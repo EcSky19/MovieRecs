@@ -28,3 +28,32 @@ def create_recommender(data_path):
     
     # 5. Construct a reverse mapping from movie titles to indices for quick lookup
     indices = pd.Series(df.index, index=df['title']).drop_duplicates()
+    
+    def get_recommendations(movie_title, top_n=5):
+        """
+        Given a movie title, returns the top_n most similar movie titles
+        based on the TF-IDF similarity of their overviews.
+        """
+        # Check if the movie_title exists in our data
+        if movie_title not in indices:
+            return [f"'{movie_title}' not found in dataset."]
+        
+        # Get the index of the movie that matches the title
+        idx = indices[movie_title]
+        
+        # Get similarity scores for all movies with that movie
+        sim_scores = list(enumerate(cosine_sim[idx]))
+        
+        # Sort movies by similarity score (descending), skipping the first match (itself)
+        sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
+        
+        # Grab the top_n from the sorted list (starting from index 1, since 0 is the movie itself)
+        sim_scores = sim_scores[1: top_n+1]
+        
+        # Get the movie indices of those top_n
+        movie_indices = [i[0] for i in sim_scores]
+        
+        # Return the titles of the top_n most similar
+        return df['title'].iloc[movie_indices].tolist()
+    
+    return get_recommendations
