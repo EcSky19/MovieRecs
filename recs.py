@@ -57,3 +57,16 @@ def create_recommender(data_path):
         return df['title'].iloc[movie_indices].tolist()
     
     return get_recommendations
+
+if __name__ == "__main__":
+    # Example usage:
+    # 1. Prepare your CSV file such that it has 'title' and 'overview' columns.
+    # 2. Instantiate the recommender with your dataset path.
+    recommender_function = create_recommender("movies.csv")
+    
+    # 3. Get recommendations for a specific movie
+    movie_name = "The Dark Knight"
+    recommendations = recommender_function(movie_name, top_n=5)
+    print(f"Recommendations for '{movie_name}':")
+    for rec in recommendations:
+        print(" -", rec)
