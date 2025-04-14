@@ -63,6 +63,15 @@ def get_recommendations(title, cosine_sim=cosine_sim, df=df, indices=indices):
     # Return the top 10 most similar movies
     return df.iloc[top_movie_indices]["Series_Title"]
 
-            
+
 if __name__ == "__main__":
-    recommend_movies(df)
+    while True:
+        user_input = input("\nEnter a movie title (or 'quit' to stop): ")
+        if user_input.lower() == "quit":
+            break
+
+        recommendations = get_recommendations(user_input, cosine_sim, df, indices)
+        if recommendations:
+            print(f"\nMovies similar to '{user_input}':")
+            for i, rec_title in enumerate(recommendations, start=1):
+                print(f"{i}. {rec_title}")
