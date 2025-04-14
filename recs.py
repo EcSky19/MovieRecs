@@ -9,20 +9,16 @@ csv_path = os.path.join(path, "imdb_top_1000.csv")
 
 df = pd.read_csv(csv_path)
 
-# Quick data inspection and cleaning
-# Print the column names to confirm exactly how they appear in the file
-print("Columns in dataset:", df.columns.tolist())
-
 # Fill NaN with empty string to avoid errors
 for col in ["Director", "Genre", "IMDB_Rating", "Meta_score"]:
-    df[col] = df[col].fillna("")
+  df[col] = df[col].fillna("")
 
 # Create a combined string:
 df["combined_features"] = (
     df["Director"] + " " +
     df["Genre"] + " " +
-    df["IMDB_Rating"] + " " +
-    df["Meta_score"]
+    str(df["IMDB_Rating"]) + " " +
+    str(df["Meta_score"])
 )
 
 tfidf = TfidfVectorizer(stop_words="english")
@@ -69,7 +65,10 @@ if __name__ == "__main__":
             break
 
         recommendations = get_recommendations(user_input, cosine_sim, df, indices)
-        if recommendations:
-            print(f"\nMovies similar to '{user_input}':")
-            for i, rec_title in enumerate(recommendations, start=1):
-                print(f"{i}. {rec_title}")
+        if recommendations.empty:
+          print(f"'{user_input}' not found or no similar movies.")
+        else:
+          print(f"\nMovies similar to '{user_input}':")
+          for i, rec_title in enumerate(recommendations, start=1):
+            print(f"{i}. {rec_title}")
+
