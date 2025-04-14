@@ -4,62 +4,80 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import linear_kernel
 import kagglehub
 
-
+# 1. Load the data
 path = "/Users/ethancoskay/.cache/kagglehub/datasets/harshitshankhdhar/imdb-dataset-of-top-1000-movies-and-tv-shows/versions/1"
 csv_path = os.path.join(path, "imdb_top_1000.csv")
 
 df = pd.read_csv(csv_path)
 
-# Fill NaN with empty string to avoid errors
-for col in ["Director", "Genre", "IMDB_Rating", "Meta_score", "Star1"]:
-  df[col] = df[col].fillna("")
+# 2. Ensure the columns needed are present; fill missing values
+for col in ["Director", "Genre", "IMDB_Rating", "Meta_score"]:
+    df[col] = df[col].fillna("")
 
-# Create a combined string:
-df["combined_features"] = (
-    df["Director"] + " " +
-    df["Genre"] + " " +
-    str(df["IMDB_Rating"]) + " " +
-    str(df["Meta_score"]) + " " +
-    df["Star1"]
-)
+# 3. Define a helper to create a weighted feature string from a row
+def create_weighted_features(row):
+    """
+    Convert numeric fields (IMDB_Rating, Meta_score) into repeated tokens,
+    and replicate text fields (Genre, Director) a chosen number of times
+    to achieve weighting in TF-IDF.
+    """
+    # Convert rating (0–10) to an int
+    try:
+        rating_int = int(round(float(row["IMDB_Rating"])))
+    except ValueError:
+        rating_int = 0
+    
+    # Convert Meta_score (0–100) by dividing by 10
+    try:
+        meta_int = int(round(float(row["Meta_score"]) / 10))
+    except ValueError:
+        meta_int = 0
+    
+    # Weighted repetition
+    rating_tokens = (" rating" * rating_int)
+    metascore_tokens = (" metascore" * meta_int)
+    # Suppose we give Genre weight=3, Director weight=1
+    genre_tokens = (" " + row["Genre"]) * 3
+    director_tokens = (" " + row["Director"]) * 1
+    
+    return (rating_tokens + metascore_tokens + genre_tokens + director_tokens).strip()
 
+# 4. Apply the weighting logic to every row
+df["weighted_features"] = df.apply(create_weighted_features, axis=1)
+
+# 5. Build TF-IDF matrix from these weighted features
 tfidf = TfidfVectorizer(stop_words="english")
-tfidf_matrix = tfidf.fit_transform(df["combined_features"])
+tfidf_matrix = tfidf.fit_transform(df["weighted_features"])
 
-# Calculate cosine similarity
+# 6. Compute the cosine similarity
 cosine_sim = linear_kernel(tfidf_matrix, tfidf_matrix)
 
 # For quick lookups, create a Series mapping titles to their DataFrame index
-# Lowercase the title to make matching easier
 df["Series_Title_lower"] = df["Series_Title"].str.lower()
 indices = pd.Series(df.index, index=df["Series_Title_lower"]).drop_duplicates()
+
+# 7. Recommendation function
 def get_recommendations(title, cosine_sim=cosine_sim, df=df, indices=indices):
-    # Convert to lowercase to match the index
     title_lower = title.lower()
-    
     if title_lower not in indices:
         print(f"'{title}' not found in dataset.")
-        return []
+        return pd.Series([], dtype=object)
     
     # Get the index of the movie that matches the title
     idx = indices[title_lower]
 
-    # Retrieve pairwise similarity scores for this movie to all others
+    # Retrieve similarity scores for this movie
     sim_scores = list(enumerate(cosine_sim[idx]))
-    
     # Sort the movies by similarity score in descending order
     sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
-    
-    # The first element is the movie itself; we exclude it
+    # The first element is the movie itself; exclude it
     sim_scores = sim_scores[1:]
     
-    # Get the indices of the top 10 most similar movies
+    # Get the indices of the top 10 most similar
     top_movie_indices = [i[0] for i in sim_scores[:10]]
-    
-    # Return the top 10 most similar movies
     return df.iloc[top_movie_indices]["Series_Title"]
 
-
+# 8. Interactive prompt
 if __name__ == "__main__":
     while True:
         user_input = input("\nEnter a movie title (or 'quit' to stop): ")
@@ -67,10 +85,9 @@ if __name__ == "__main__":
             break
 
         recommendations = get_recommendations(user_input, cosine_sim, df, indices)
-        if recommendations.empty:
-          print(f"'{user_input}' not found or no similar movies.")
+        if len(recommendations) == 0:
+            print(f"'{user_input}' not found or no similar movies.")
         else:
-          print(f"\nMovies similar to '{user_input}':")
-          for i, rec_title in enumerate(recommendations, start=1):
-            print(f"{i}. {rec_title}")
-
+            print(f"\nMovies similar to '{user_input}':")
+            for i, rec_title in enumerate(recommendations, start=1):
+                print(f"{i}. {rec_title}")
