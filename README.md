@@ -9,8 +9,7 @@ A content-based movie recommender system that uses TF-IDF vectorization with cus
 4. [Dataset](#dataset)  
 5. [Running the Recommender (CLI)](#running-the-recommender-cli)  
 6. [Running the Streamlit App](#running-the-streamlit-app)  
-7. [Customization](#customization)  
-8. [License](#license)
+7. [Customization](#customization) 
 
 ---
 
