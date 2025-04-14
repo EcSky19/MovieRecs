@@ -94,7 +94,7 @@ def main():
     st.title("Movie Recommender")
     st.write("Enter a movie title and get similar recommendations.")
 
-    user_movie = st.text_input("Enter a movie title", value="The Godfather")
+    user_movie = st.text_input("Enter a movie title", value="")
 
     if st.button("Recommend"):
         recommendations = get_recommendations(user_movie, df, indices, cosine_sim)
