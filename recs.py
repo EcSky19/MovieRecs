@@ -37,47 +37,32 @@ cosine_sim = linear_kernel(tfidf_matrix, tfidf_matrix)
 # Lowercase the title to make matching easier
 df["Series_Title_lower"] = df["Series_Title"].str.lower()
 indices = pd.Series(df.index, index=df["Series_Title_lower"]).drop_duplicates()
+def get_recommendations(title, cosine_sim=cosine_sim, df=df, indices=indices):
+    # Convert to lowercase to match the index
+    title_lower = title.lower()
+    
+    if title_lower not in indices:
+        print(f"'{title}' not found in dataset.")
+        return []
+    
+    # Get the index of the movie that matches the title
+    idx = indices[title_lower]
 
-# Recommendation function
-def recommend_movies(dataframe):
-    """
-    This function prompts the user for input, filters the dataframe,
-    then sorts and prints the top results.
-    """
+    # Retrieve pairwise similarity scores for this movie to all others
+    sim_scores = list(enumerate(cosine_sim[idx]))
+    
+    # Sort the movies by similarity score in descending order
+    sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
+    
+    # The first element is the movie itself; we exclude it
+    sim_scores = sim_scores[1:]
+    
+    # Get the indices of the top 10 most similar movies
+    top_movie_indices = [i[0] for i in sim_scores[:10]]
+    
+    # Return the top 10 most similar movies
+    return df.iloc[top_movie_indices]["Series_Title"]
 
-    # Get user inputs
-    user_genre = input("Enter a genre (e.g., Drama, Action): ").strip()
-    user_director = input("Enter a director's name or partial name (e.g., Spielberg): ").strip()
-    min_metascore_str = input("Enter a minimum Meta Score (0-100): ").strip()
-
-    # Basic validation / default value
-    try:
-        min_metascore = int(min_metascore_str)
-    except ValueError:
-        print("Invalid Meta Score input. Defaulting to 0.")
-        min_metascore = 0
-
-    # Filter by genre, director, and metascore
-    # Note: We use 'str.contains(...)' with case=False for case-insensitive matches.
-    filtered = dataframe[
-        (dataframe["Genre"].str.contains(user_genre, case=False)) &
-        (dataframe["Director"].str.contains(user_director, case=False)) &
-        (dataframe["Meta_score"] >= min_metascore)
-    ]
-
-    # Sort the results primarily by IMDB Rating, then by Meta Score
-    filtered = filtered.sort_values(by=["IMDB_Rating", "Meta_score"], ascending=False)
-
-    # Print results
-    if filtered.empty:
-        print("No matching movies found with your specified criteria.")
-    else:
-        print("\nTop recommended movies based on your criteria:\n")
-        # Show top 10
-        for i, row in filtered.head(10).iterrows():
-            print(f"Title: {row['Series_Title']} | Year: {row['Released_Year']} | "
-                  f"IMDB Rating: {row['IMDB_Rating']} | Meta Score: {row['Meta_score']} | "
-                  f"Director: {row['Director']} | Genre: {row['Genre']}")
             
 if __name__ == "__main__":
     recommend_movies(df)
