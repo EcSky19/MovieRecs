@@ -63,3 +63,6 @@ def recommend_movies(dataframe):
             print(f"Title: {row['Series_Title']} | Year: {row['Released_Year']} | "
                   f"IMDB Rating: {row['IMDB_Rating']} | Meta Score: {row['Meta_score']} | "
                   f"Director: {row['Director']} | Genre: {row['Genre']}")
+            
+if __name__ == "__main__":
+    recommend_movies(df)
