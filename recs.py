@@ -14,17 +14,15 @@ df = pd.read_csv(csv_path)
 print("Columns in dataset:", df.columns.tolist())
 
 # Fill NaN with empty string to avoid errors
-for col in ["Director", "Genre", "Star1", "Star2", "Star3", "Star4"]:
+for col in ["Director", "Genre", "IMDB_Rating", "Meta_score"]:
     df[col] = df[col].fillna("")
 
 # Create a combined string:
 df["combined_features"] = (
     df["Director"] + " " +
     df["Genre"] + " " +
-    df["Star1"] + " " +
-    df["Star2"] + " " +
-    df["Star3"] + " " +
-    df["Star4"]
+    df["IMDB_Rating"] + " " +
+    df["Meta_score"]
 )
 
 tfidf = TfidfVectorizer(stop_words="english")
