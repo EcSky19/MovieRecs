@@ -2,19 +2,17 @@ import os
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import linear_kernel
-import kagglehub
 
-# 1. Load the data
+# Load the data
 path = "/Users/ethancoskay/.cache/kagglehub/datasets/harshitshankhdhar/imdb-dataset-of-top-1000-movies-and-tv-shows/versions/1"
 csv_path = os.path.join(path, "imdb_top_1000.csv")
 
 df = pd.read_csv(csv_path)
 
-# 2. Ensure the columns needed are present; fill missing values
+# Ensure the columns needed are present; fill missing values
 for col in ["Director", "Genre", "IMDB_Rating", "Meta_score"]:
     df[col] = df[col].fillna("")
 
-# 3. Define a helper to create a weighted feature string from a row
 def create_weighted_features(row):
     """
     Convert numeric fields (IMDB_Rating, Meta_score) into repeated tokens,
@@ -42,21 +40,19 @@ def create_weighted_features(row):
     
     return (rating_tokens + metascore_tokens + genre_tokens + director_tokens).strip()
 
-# 4. Apply the weighting logic to every row
+# Apply the weighting logic to every row
 df["weighted_features"] = df.apply(create_weighted_features, axis=1)
 
-# 5. Build TF-IDF matrix from these weighted features
+# Build TF-IDF matrix from these weighted features
 tfidf = TfidfVectorizer(stop_words="english")
 tfidf_matrix = tfidf.fit_transform(df["weighted_features"])
 
-# 6. Compute the cosine similarity
+# Compute the cosine similarity
 cosine_sim = linear_kernel(tfidf_matrix, tfidf_matrix)
 
-# For quick lookups, create a Series mapping titles to their DataFrame index
 df["Series_Title_lower"] = df["Series_Title"].str.lower()
 indices = pd.Series(df.index, index=df["Series_Title_lower"]).drop_duplicates()
 
-# 7. Recommendation function
 def get_recommendations(title, cosine_sim=cosine_sim, df=df, indices=indices):
     title_lower = title.lower()
     if title_lower not in indices:
@@ -77,7 +73,7 @@ def get_recommendations(title, cosine_sim=cosine_sim, df=df, indices=indices):
     top_movie_indices = [i[0] for i in sim_scores[:10]]
     return df.iloc[top_movie_indices]["Series_Title"]
 
-# 8. Interactive prompt
+# Interactive prompt
 if __name__ == "__main__":
     while True:
         user_input = input("\nEnter a movie title (or 'quit' to stop): ")
