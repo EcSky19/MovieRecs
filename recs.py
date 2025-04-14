@@ -4,13 +4,14 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import linear_kernel
 import kagglehub
 
+
 path = "/Users/ethancoskay/.cache/kagglehub/datasets/harshitshankhdhar/imdb-dataset-of-top-1000-movies-and-tv-shows/versions/1"
 csv_path = os.path.join(path, "imdb_top_1000.csv")
 
 df = pd.read_csv(csv_path)
 
 # Fill NaN with empty string to avoid errors
-for col in ["Director", "Genre", "IMDB_Rating", "Meta_score"]:
+for col in ["Director", "Genre", "IMDB_Rating", "Meta_score", "Star1"]:
   df[col] = df[col].fillna("")
 
 # Create a combined string:
@@ -18,7 +19,8 @@ df["combined_features"] = (
     df["Director"] + " " +
     df["Genre"] + " " +
     str(df["IMDB_Rating"]) + " " +
-    str(df["Meta_score"])
+    str(df["Meta_score"]) + " " +
+    df["Star1"]
 )
 
 tfidf = TfidfVectorizer(stop_words="english")
