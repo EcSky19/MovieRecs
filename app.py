@@ -10,8 +10,8 @@ from sklearn.metrics.pairwise import linear_kernel
 # 1. Load the dataset
 ############################################
 
-DATA_PATH = "/path/to/dataset/folder"  # Adjust to your folder
-CSV_FILE = "imdb_top_1000.csv"         # Adjust if needed
+DATA_PATH = "/Users/ethancoskay/.cache/kagglehub/datasets/harshitshankhdhar/imdb-dataset-of-top-1000-movies-and-tv-shows/versions/1"
+CSV_FILE = "imdb_top_1000.csv"
 
 csv_path = os.path.join(DATA_PATH, CSV_FILE)
 df = pd.read_csv(csv_path)
@@ -71,7 +71,7 @@ def get_recommendations(title):
     sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
     sim_scores = sim_scores[1:]  # exclude itself
 
-    top_indices = [i[0] for i in sim_scores[:10]]
+    top_indices = [i[0] for i in sim_scores[:5]]
     return df.iloc[top_indices]["Series_Title"]
 
 ############################################
