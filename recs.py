@@ -19,7 +19,7 @@ def create_weighted_features(row):
     and replicate text fields (Genre, Director) a chosen number of times
     to achieve weighting in TF-IDF.
     """
-    # Convert rating (0–10) to an int
+    # Convert rating to an int
     try:
         rating_int = int(round(float(row["IMDB_Rating"])))
     except ValueError:
@@ -30,7 +30,6 @@ def create_weighted_features(row):
         meta_int = int(round(float(row["Meta_score"]) / 10))
     except ValueError:
         meta_int = 0
-    #
     # Weighted repetition
     rating_tokens = (" rating" * rating_int)
     metascore_tokens = (" metascore" * meta_int)
