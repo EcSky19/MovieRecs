@@ -30,7 +30,7 @@ def create_weighted_features(row):
         meta_int = int(round(float(row["Meta_score"]) / 10))
     except ValueError:
         meta_int = 0
-    
+    #
     # Weighted repetition
     rating_tokens = (" rating" * rating_int)
     metascore_tokens = (" metascore" * meta_int)
