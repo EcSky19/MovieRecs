@@ -41,7 +41,9 @@ def create_weighted_features(row):
     metascore_tokens = " metascore" * meta_int
     genre_tokens = (" " + row["Genre"]) * 3
     director_tokens = (" " + row["Director"]) * 1
-    star_tokens = (" " + row["Star1"]) * 1
+
+    # Include all actor names to improve similarity on casts
+    star_tokens = "".join([(" " + row[col]) for col in ["Star1", "Star2", "Star3", "Star4"]])
 
     return (rating_tokens + metascore_tokens + genre_tokens + director_tokens + star_tokens).strip()
 
@@ -67,8 +69,12 @@ def load_data():
         "IMDB_Rating",
         "Director",
         "Star1",
+        "Star2",
+        "Star3",
+        "Star4",
         "Poster_Link",
         "Meta_score",
+        "Overview",
     ]
     for col in needed_cols:
         if col not in df.columns:
@@ -108,13 +114,16 @@ def get_recommendations(title: str, df: pd.DataFrame, cosine_sim, indices):
                 "Released_Year",
                 "Director",
                 "Star1",
+                "Star2",
+                "Star3",
+                "Star4",
                 "IMDB_Rating",
                 "Genre",
+                "Overview",
                 "Poster_Link",
             ]
         ]
         .reset_index(drop=True)
-        .rename(columns={"Star1": "Lead_Actor"})
     )
 
 ############################################
@@ -139,13 +148,25 @@ def main_app(df, cosine_sim, indices):
                     if row["Poster_Link"]:
                         st.image(row["Poster_Link"], width=120)
                 with col_text:
+                    actors = ", ".join(
+                        filter(
+                            None,
+                            [row.get(col, "") for col in ["Star1", "Star2", "Star3", "Star4"]],
+                        )
+                    ) or "N/A"
+
+                    overview = row.get("Overview", "")
+                    if overview and len(overview) > 500:
+                        overview = overview[:480].rstrip() + "…"
+
                     st.markdown(
                         f"**{row['Series_Title']}**\n\n"
                         f"Released: {row['Released_Year']}  |  "
                         f"IMDb: {row['IMDB_Rating']}⭐\n\n"
-                        f"Director: {row['Director']}  |  "
-                        f"Lead Actor: {row['Lead_Actor']}\n\n"
-                        f"Genre: {row['Genre']}"
+                        f"Director: {row['Director']}\n\n"
+                        f"Actors: {actors}\n\n"
+                        f"Genre: {row['Genre']}\n\n"
+                        f"**Overview:** {overview}"
                     )
 
 ############################################
