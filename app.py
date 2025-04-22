@@ -94,7 +94,57 @@ def load_data():
     return df, cosine_sim, indices
 
 ############################################
-# 4. Recommendation Function
+# 4. Recommendation Helper (UI)
+############################################
+
+def display_recommendations(title: str, df: pd.DataFrame, cosine_sim, indices):
+    recs_df = get_recommendations(title, df, cosine_sim, indices)
+    if recs_df is None:
+        st.warning(f"'{title}' not found in dataset.")
+    else:
+        st.success(f"Movies similar to '{title}':")
+        for _, row in recs_df.iterrows():
+            col_img, col_text = st.columns([1, 5])
+            with col_img:
+                if row["Poster_Link"]:
+                    st.image(row["Poster_Link"], width=120)
+            with col_text:
+                actors = ", ".join(
+                    filter(None, [row.get(col, "") for col in ["Star1", "Star2", "Star3", "Star4"]])
+                ) or "N/A"
+
+                overview = row.get("Overview", "")
+                if len(overview) > 500:
+                    overview = overview[:480].rstrip() + "…"
+
+                st.markdown(
+                    f"**{row['Series_Title']}**\n\n"
+                    f"Released: {row['Released_Year']}  |  "
+                    f"IMDb: {row['IMDB_Rating']}⭐\n\n"
+                    f"Director: {row['Director']}\n\n"
+                    f"Actors: {actors}\n\n"
+                    f"Genre: {row['Genre']}\n\n"
+                    f"**Overview:** {overview}"
+                )
+
+############################################
+# 5. Main Recommender UI
+############################################
+
+def main_app(df, cosine_sim, indices):
+    st.title("🎬 Movie Recommender")
+    st.write("Enter a movie you love and press **Enter** to get five similar gems – complete with posters and key details.")
+
+    def recommend_callback():
+        title = st.session_state.get("user_movie", "").strip()
+        if title:
+            display_recommendations(title, df, cosine_sim, indices)
+
+    # Pressing Enter in this field triggers recommend_callback
+    st.text_input("Movie Title:", key="user_movie", on_change=recommend_callback)
+
+############################################
+# 6. Recommendation Logic (unchanged)
 ############################################
 
 def get_recommendations(title: str, df: pd.DataFrame, cosine_sim, indices):
@@ -127,50 +177,7 @@ def get_recommendations(title: str, df: pd.DataFrame, cosine_sim, indices):
     )
 
 ############################################
-# 5. Main Recommender UI
-############################################
-
-def main_app(df, cosine_sim, indices):
-    st.title("🎬 Movie Recommender")
-    st.write("Enter a movie you love and discover five similar gems – complete with posters and key details.")
-
-    user_movie = st.text_input("Movie Title:")
-
-    if st.button("Recommend"):
-        recs_df = get_recommendations(user_movie, df, cosine_sim, indices)
-        if recs_df is None:
-            st.warning(f"'{user_movie}' not found in dataset.")
-        else:
-            st.success(f"Movies similar to '{user_movie}':")
-            for _, row in recs_df.iterrows():
-                col_img, col_text = st.columns([1, 5])
-                with col_img:
-                    if row["Poster_Link"]:
-                        st.image(row["Poster_Link"], width=120)
-                with col_text:
-                    actors = ", ".join(
-                        filter(
-                            None,
-                            [row.get(col, "") for col in ["Star1", "Star2", "Star3", "Star4"]],
-                        )
-                    ) or "N/A"
-
-                    overview = row.get("Overview", "")
-                    if overview and len(overview) > 500:
-                        overview = overview[:480].rstrip() + "…"
-
-                    st.markdown(
-                        f"**{row['Series_Title']}**\n\n"
-                        f"Released: {row['Released_Year']}  |  "
-                        f"IMDb: {row['IMDB_Rating']}⭐\n\n"
-                        f"Director: {row['Director']}\n\n"
-                        f"Actors: {actors}\n\n"
-                        f"Genre: {row['Genre']}\n\n"
-                        f"**Overview:** {overview}"
-                    )
-
-############################################
-# 6. App bootstrap
+# 7. App bootstrap
 ############################################
 
 def run():
