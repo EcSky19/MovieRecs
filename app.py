@@ -5,52 +5,57 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import linear_kernel
 
 ############################################
-# 1. Auth Handler (Log in & Sign up)
+# 0. Utility
+############################################
+
+def safe_rerun() -> None:
+    """Attempt `st.experimental_rerun()` only when running inside the
+    Streamlit runtime. Silently ignore the call in plain‑Python mode."""
+    try:
+        st.experimental_rerun()
+    except Exception:
+        pass
+
+############################################
+# 1. Auth Handler (Log in & Sign up — buttons only)
 ############################################
 
 def init_auth_state():
-    """Ensure auth‑related keys exist in session_state."""
-    if "users" not in st.session_state:
-        # pre‑seed with an admin account
-        st.session_state["users"] = {"admin": "1234"}
-    if "logged_in" not in st.session_state:
-        st.session_state["logged_in"] = False
+    """Seed a default admin user and ensure auth keys exist."""
+    st.session_state.setdefault("users", {"admin": "1234"})
+    st.session_state.setdefault("logged_in", False)
 
 
 def login_screen():
     """Render Log in / Sign up UI.
 
-    * Radio selector lets user toggle between the two modes.
-    * After a successful log in or sign up we mark `logged_in` and rerun so
-      the main app can render immediately without an extra click."""
+    * Uses **buttons** so the **Enter key** has no effect.
+    * `st.radio` is given an explicit `key` to avoid duplicate‑ID errors on
+      reruns.
+    * After success we set `logged_in` and invoke `safe_rerun()` so the main
+      app renders immediately under Streamlit.
+    """
 
     st.title("Welcome")
-    mode = st.radio("Choose an option", ["Log in", "Sign up"], horizontal=True)
+    mode = st.radio("Choose an option", ["Log in", "Sign up"], horizontal=True, key="auth_mode")
 
     if mode == "Log in":
-        with st.form("login_form", clear_on_submit=False):
-            username = st.text_input("Username")
-            password = st.text_input("Password", type="password")
-            submitted = st.form_submit_button("Log in")
+        username = st.text_input("Username", key="login_user")
+        password = st.text_input("Password", type="password", key="login_pass")
 
-        if submitted:
+        if st.button("Log in", key="login_btn"):
             users = st.session_state["users"]
             if username in users and users[username] == password:
                 st.session_state["logged_in"] = True
-                try:
-                    st.experimental_rerun()
-                except RuntimeError:
-                    pass
+                safe_rerun()
             else:
                 st.error("Invalid credentials. Please try again.")
 
     else:  # Sign up
-        with st.form("signup_form", clear_on_submit=False):
-            new_user = st.text_input("Choose a username")
-            new_pass = st.text_input("Choose a password", type="password")
-            submitted = st.form_submit_button("Create account")
+        new_user = st.text_input("Choose a username", key="signup_user")
+        new_pass = st.text_input("Choose a password", type="password", key="signup_pass")
 
-        if submitted:
+        if st.button("Create account", key="signup_btn"):
             if not new_user or not new_pass:
                 st.error("Username and password cannot be empty.")
             elif new_user in st.session_state["users"]:
@@ -59,18 +64,14 @@ def login_screen():
                 st.session_state["users"][new_user] = new_pass
                 st.success("Account created! You are now logged in.")
                 st.session_state["logged_in"] = True
-                try:
-                    st.experimental_rerun()
-                except RuntimeError:
-                    pass
+                safe_rerun()
 
 ############################################
 # 2. Weighted Feature Creation
 ############################################
 
 def create_weighted_features(row):
-    """Create synthetic text features with hand‑tuned weights so that
-    the vectoriser can pick them up when computing similarity."""
+    """Create synthetic text for TF‑IDF based on weighted attributes."""
     try:
         rating_int = int(round(float(row["IMDB_Rating"])))
     except ValueError:
@@ -84,15 +85,13 @@ def create_weighted_features(row):
     rating_tokens = " rating" * rating_int
     metascore_tokens = " metascore" * meta_int
     genre_tokens = (" " + row["Genre"]) * 3
-    director_tokens = (" " + row["Director"]) * 1
-
-    # Include all actor names to improve similarity on casts
+    director_tokens = (" " + row["Director"])
     star_tokens = "".join(" " + row[col] for col in ["Star1", "Star2", "Star3", "Star4"])
 
     return (rating_tokens + metascore_tokens + genre_tokens + director_tokens + star_tokens).strip()
 
 ############################################
-# 3. Load Data and Compute Similarity
+# 3. Load Data & Similarity Matrix
 ############################################
 
 def load_data():
@@ -105,69 +104,64 @@ def load_data():
 
     df = pd.read_csv(csv_path)
 
-    # Ensure required columns exist and have no NAs
-    needed_cols = [
-        "Series_Title",
-        "Released_Year",
-        "Genre",
-        "IMDB_Rating",
-        "Director",
-        "Star1",
-        "Star2",
-        "Star3",
-        "Star4",
-        "Poster_Link",
-        "Meta_score",
-        "Overview",
+    required = [
+        "Series_Title","Released_Year","Genre","IMDB_Rating","Director",
+        "Star1","Star2","Star3","Star4","Poster_Link","Meta_score","Overview"
     ]
-    for col in needed_cols:
+    for col in required:
         if col not in df.columns:
             df[col] = ""
         df[col] = df[col].fillna("")
 
-    # Feature engineering for similarity search
     df["weighted_features"] = df.apply(create_weighted_features, axis=1)
-
     tfidf = TfidfVectorizer(stop_words="english")
     tfidf_matrix = tfidf.fit_transform(df["weighted_features"])
     cosine_sim = linear_kernel(tfidf_matrix, tfidf_matrix)
 
     df["Series_Title_lower"] = df["Series_Title"].str.lower()
     indices = pd.Series(df.index, index=df["Series_Title_lower"]).drop_duplicates()
-
     return df, cosine_sim, indices
 
 ############################################
-# 4. Recommendation Helper (UI)
+# 4. Recommendation Helpers
 ############################################
 
-def display_recommendations(title: str, df: pd.DataFrame, cosine_sim, indices):
-    recs_df = get_recommendations(title, df, cosine_sim, indices)
-    if recs_df is None:
+def get_recommendations(title: str, df: pd.DataFrame, cosine_sim, indices):
+    key = title.lower().strip()
+    if key not in indices:
+        return None
+    idx = indices[key]
+    sim_scores = sorted(enumerate(cosine_sim[idx]), key=lambda x: x[1], reverse=True)
+    top_idx = [i[0] for i in sim_scores[1:6]]
+    cols = [
+        "Series_Title","Released_Year","Director","Star1","Star2","Star3","Star4",
+        "IMDB_Rating","Genre","Overview","Poster_Link"
+    ]
+    return df.iloc[top_idx][cols].reset_index(drop=True)
+
+
+def display_recommendations(title, df, cosine_sim, indices):
+    recs = get_recommendations(title, df, cosine_sim, indices)
+    if recs is None:
         st.warning(f"'{title}' not found in dataset.")
-    else:
-        st.success(f"Movies similar to '{title}':")
-        for _, row in recs_df.iterrows():
-            col_img, col_text = st.columns([1, 5])
-            with col_img:
-                if row["Poster_Link"]:
-                    st.image(row["Poster_Link"], width=120)
-            with col_text:
-                actors = ", ".join(filter(None, (row.get(col, "") for col in ["Star1", "Star2", "Star3", "Star4"]))) or "N/A"
-
-                overview = row.get("Overview", "")
-                if len(overview) > 500:
-                    overview = overview[:480].rstrip() + "…"
-
-                st.markdown(
-                    f"**{row['Series_Title']}**\n\n"
-                    f"Released: {row['Released_Year']}  |  "
-                    f"IMDb: {row['IMDB_Rating']}⭐\n\n"
-                    f"Director: {row['Director']}\n\n"
-                    f"Actors: {actors}\n\n"
-                    f"Genre: {row['Genre']}\n\n"
-                    f"**Overview:** {overview}"
-                )
+        return
+    st.success(f"Movies similar to '{title}':")
+    for _, row in recs.iterrows():
+        col_img, col_txt = st.columns([1,5])
+        with col_img:
+            if row["Poster_Link"]:
+                st.image(row["Poster_Link"], width=120)
+        with col_txt:
+            actors = ", ".join(filter(None, (row[col] for col in ["Star1","Star2","Star3","Star4"]))) or "N/A"
+            overview = row["Overview"][:480].rstrip() + ("…" if len(row["Overview"])>480 else "")
+            st.markdown(
+                f"**{row['Series_Title']}**\n\n"
+                f"Released: {row['Released_Year']}  |  IMDb: {row['IMDB_Rating']}⭐\n\n"
+                f"Director: {row['Director']}\n\n"
+                f"Actors: {actors}\n\n"
+                f"Genre: {row['Genre']}\n\n"
+                f"**Overview:** {overview}"
+            )
 
 ############################################
 # 5. Main Recommender UI
@@ -175,64 +169,28 @@ def display_recommendations(title: str, df: pd.DataFrame, cosine_sim, indices):
 
 def main_app(df, cosine_sim, indices):
     st.title("🎬 Movie Recommender")
-    st.write(
-        "Enter a movie you love and press **Enter** to get five similar gems – complete with posters and key details."
-    )
+    st.write("Enter a movie you love and press **Enter** to get five similar gems — complete with posters and key details.")
 
-    def recommend_callback():
-        title = st.session_state.get("user_movie", "").strip()
+    def on_enter():
+        title = st.session_state.get("movie_input", "").strip()
         if title:
             display_recommendations(title, df, cosine_sim, indices)
 
-    st.text_input("Movie Title:", key="user_movie", on_change=recommend_callback)
+    st.text_input("Movie Title:", key="movie_input", on_change=on_enter)
 
 ############################################
-# 6. Recommendation Logic
-############################################
-
-def get_recommendations(title: str, df: pd.DataFrame, cosine_sim, indices):
-    title_lower = title.lower().strip()
-    if title_lower not in indices:
-        return None
-
-    idx = indices[title_lower]
-    sim_scores = list(enumerate(cosine_sim[idx]))
-    sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
-    top_indices = [i[0] for i in sim_scores[1:6]]  # top‑5 similar
-
-    return (
-        df.iloc[top_indices][
-            [
-                "Series_Title",
-                "Released_Year",
-                "Director",
-                "Star1",
-                "Star2",
-                "Star3",
-                "Star4",
-                "IMDB_Rating",
-                "Genre",
-                "Overview",
-                "Poster_Link",
-            ]
-        ]
-        .reset_index(drop=True)
-    )
-
-############################################
-# 7. App bootstrap
+# 6. Bootstrap
 ############################################
 
 def run():
     init_auth_state()
-
     if not st.session_state["logged_in"]:
         login_screen()
         if not st.session_state["logged_in"]:
             st.stop()
-
     df, cosine_sim, indices = load_data()
     main_app(df, cosine_sim, indices)
+
 
 if __name__ == "__main__":
     run()
