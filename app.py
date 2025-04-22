@@ -183,11 +183,19 @@ def main_app(df, cosine_sim, indices):
 ############################################
 
 def run():
+    """Entry point. Shows *only* one screen at a time:
+    1. Login/Sign‑up when the user is **not** authenticated.
+    2. Recommender dashboard once authenticated.
+    """
+
     init_auth_state()
+
     if not st.session_state["logged_in"]:
+        # -------- Login / Sign‑up Screen --------
         login_screen()
-        if not st.session_state["logged_in"]:
-            st.stop()
+        return  # ensure recommender code below does not execute in this pass
+
+    # -------- Recommender Screen --------
     df, cosine_sim, indices = load_data()
     main_app(df, cosine_sim, indices)
 
