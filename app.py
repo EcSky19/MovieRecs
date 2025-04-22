@@ -181,49 +181,91 @@ def recommend(title, df, cos, idx):
 def recommender_ui(df, cos, idx):
     st.title("🎬 Movie Recommender")
 
-    # ── search box
-    movie = st.text_input("Enter a movie you love:")
-    if st.session_state.get("trigger_rec", False) or st.button(
-        "Recommend", key="recommend_btn"
-    ):
-        st.session_state["trigger_rec"] = False
+    movie = st.text_input("Enter a movie you love:", key="search_movie")
+    username = st.session_state["username"]
+    users    = st.session_state["users"]
+
+    # ── 1) Movie Info Card ─────────────────────────────────────────
+    if movie:
+        # find exact match (case‑insensitive)
+        match = df[df["Series_Title"].str.lower() == movie.lower().strip()]
+        if not match.empty:
+            r = match.iloc[0]
+            st.subheader("📖 Movie Info")
+            col1, col2 = st.columns([1, 5])
+            with col1:
+                if r["Poster_Link"]:
+                    st.image(r["Poster_Link"], width=120)
+            with col2:
+                # details + overview
+                stars = [
+                    r.get(f"Star{i}", "")
+                    for i in range(1, 5)
+                    if r.get(f"Star{i}", "")
+                ]
+                st.markdown(
+                    f"**{r['Series_Title']}**\n\n"
+                    f"Released: {r['Released_Year']} | IMDb {r['IMDB_Rating']}⭐\n\n"
+                    f"Director: {r['Director']}\n\n"
+                    f"Stars: {', '.join(stars)}\n\n"
+                    f"Genre: {r['Genre']}\n\n"
+                    f"**Overview:**  \n{r.get('Overview','No overview available.')}"
+                )
+                # own like‑button for the info card
+                info_like_key = f"info_like_{r['Series_Title']}"
+                if st.button("★ Like this movie", key=info_like_key):
+                    if r["Series_Title"] not in users[username]["likes"]:
+                        users[username]["likes"].append(r["Series_Title"])
+                        save_users(users)
+                        st.toast("Added to your likes!", icon="❤️")
+        else:
+            st.info(f"‘{movie}’ not found in our database.")
+
+    st.markdown("---")  # separator between info and recs
+
+    # ── 2) Recommendation Section ───────────────────────────────────
+    if st.button("Recommend", key="recommend_btn"):
         recs = recommend(movie, df, cos, idx)
         if recs is None:
-            st.warning(f"‘{movie}’ not found.")
+            st.warning(f"‘{movie}’ not found; can’t generate recommendations.")
         else:
             st.success(f"Movies similar to ‘{movie}’")
             for _, r in recs.iterrows():
-                col1, col2 = st.columns([1, 5])
-                with col1:
+                c1, c2 = st.columns([1, 5])
+                with c1:
                     if r["Poster_Link"]:
                         st.image(r["Poster_Link"], width=110)
-                with col2:
+                with c2:
+                    stars = [
+                        r.get(f"Star{i}", "")
+                        for i in range(1, 5)
+                        if r.get(f"Star{i}", "")
+                    ]
                     st.markdown(
                         f"**{r['Series_Title']}**\n\n"
                         f"Released: {r['Released_Year']} | IMDb {r['IMDB_Rating']}⭐\n\n"
-                        f"Director: {r['Director']}  \n"
-                        f"Stars: {', '.join([r.get(f'Star{i}', '') for i in range(1,5) if r.get(f'Star{i}')])}  \n"
-                        f"Genre: {r['Genre']}  \n"
-                        f"Overview: {r['Overview']}"
+                        f"Director: {r['Director']}\n\n"
+                        f"Stars: {', '.join(stars)}\n\n"
+                        f"Genre: {r['Genre']}\n\n"
+                        f"**Overview:**  \n{r.get('Overview','No overview available.')}"
                     )
-                    like_key = f"like_{r['Series_Title']}"
-                    if st.button("★ Like", key=like_key):
-                        usr = st.session_state["username"]
-                        users = st.session_state["users"]
-                        if r["Series_Title"] not in users[usr]["likes"]:
-                            users[usr]["likes"].append(r["Series_Title"])
+                    rec_like_key = f"rec_like_{r['Series_Title']}"
+                    if st.button("★ Like", key=rec_like_key):
+                        if r["Series_Title"] not in users[username]["likes"]:
+                            users[username]["likes"].append(r["Series_Title"])
                             save_users(users)
                             st.toast("Added to your likes!", icon="❤️")
 
-    # ── sidebar with liked movies
-    st.sidebar.header(f"👤 {st.session_state['username']}")
-    likes = st.session_state["users"][st.session_state["username"]]["likes"]
-    if likes:
+    # ── 3) Sidebar: show updated likes immediately ─────────────────
+    st.sidebar.header(f"👤 {username}")
+    liked = users[username]["likes"]
+    if liked:
         st.sidebar.subheader("Your liked movies")
-        for m in likes:
-            st.sidebar.write(f"• {m}")
+        for title in liked:
+            st.sidebar.write(f"• {title}")
     else:
         st.sidebar.info("No liked movies yet – show some ❤️!")
+
 
 ###############################################################################
 # 6. ─────────────────────────────  MAIN  ─────────────────────────────────── #
