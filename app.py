@@ -1,4 +1,5 @@
 import os
+import json
 import pandas as pd
 import streamlit as st
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -8,33 +9,55 @@ from sklearn.metrics.pairwise import linear_kernel
 # 0. Utility
 ############################################
 
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+USERS_FILE = os.path.join(APP_DIR, "users.json")
+
+
 def safe_rerun() -> None:
-    """Attempt `st.experimental_rerun()` only when running inside the
-    Streamlit runtime. Silently ignore the call in plain‑Python mode."""
+    """Trigger a Streamlit rerun only inside the Streamlit runtime."""
     try:
         st.experimental_rerun()
     except Exception:
         pass
 
+
 ############################################
-# 1. Auth Handler (Log in & Sign up — buttons only)
+# 1. Persistent User Store
+############################################
+
+def load_user_db():
+    """Load the users database from disk. Returns a {username: password} dict."""
+    if os.path.exists(USERS_FILE):
+        try:
+            with open(USERS_FILE, "r", encoding="utf‑8") as f:
+                return json.load(f)
+        except Exception:
+            pass  # Corrupt file — fall through to default
+    # Default admin account if no file or unreadable
+    return {"admin": "1234"}
+
+
+def save_user_db(users):
+    """Persist the users dict to disk (best‑effort)."""
+    try:
+        with open(USERS_FILE, "w", encoding="utf‑8") as f:
+            json.dump(users, f, indent=2)
+    except Exception:
+        st.warning("Warning: Failed to save users file; credentials won't persist.")
+
+
+############################################
+# 2. Auth Handler (Log in & Sign up — buttons only)
 ############################################
 
 def init_auth_state():
-    """Seed a default admin user and ensure auth keys exist."""
-    st.session_state.setdefault("users", {"admin": "1234"})
+    """Ensure auth keys exist and load persistent users."""
+    st.session_state.setdefault("users", load_user_db())
     st.session_state.setdefault("logged_in", False)
 
 
 def login_screen():
-    """Render Log in / Sign up UI.
-
-    * Uses **buttons** so the **Enter key** has no effect.
-    * `st.radio` is given an explicit `key` to avoid duplicate‑ID errors on
-      reruns.
-    * After success we set `logged_in` and invoke `safe_rerun()` so the main
-      app renders immediately under Streamlit.
-    """
+    """Render Log in / Sign up UI. Uses buttons so **Enter** does nothing."""
 
     st.title("Welcome")
     mode = st.radio("Choose an option", ["Log in", "Sign up"], horizontal=True, key="auth_mode")
@@ -62,12 +85,14 @@ def login_screen():
                 st.error("Username already exists. Please pick another.")
             else:
                 st.session_state["users"][new_user] = new_pass
+                save_user_db(st.session_state["users"])  # Persist new account
                 st.success("Account created! You are now logged in.")
                 st.session_state["logged_in"] = True
                 safe_rerun()
 
+
 ############################################
-# 2. Weighted Feature Creation
+# 3. Weighted Feature Creation
 ############################################
 
 def create_weighted_features(row):
@@ -85,13 +110,14 @@ def create_weighted_features(row):
     rating_tokens = " rating" * rating_int
     metascore_tokens = " metascore" * meta_int
     genre_tokens = (" " + row["Genre"]) * 3
-    director_tokens = (" " + row["Director"])
+    director_tokens = " " + row["Director"]
     star_tokens = "".join(" " + row[col] for col in ["Star1", "Star2", "Star3", "Star4"])
 
     return (rating_tokens + metascore_tokens + genre_tokens + director_tokens + star_tokens).strip()
 
+
 ############################################
-# 3. Load Data & Similarity Matrix
+# 4. Load Data & Similarity Matrix
 ############################################
 
 def load_data():
@@ -122,8 +148,9 @@ def load_data():
     indices = pd.Series(df.index, index=df["Series_Title_lower"]).drop_duplicates()
     return df, cosine_sim, indices
 
+
 ############################################
-# 4. Recommendation Helpers
+# 5. Recommendation Helpers
 ############################################
 
 def get_recommendations(title: str, df: pd.DataFrame, cosine_sim, indices):
@@ -147,13 +174,13 @@ def display_recommendations(title, df, cosine_sim, indices):
         return
     st.success(f"Movies similar to '{title}':")
     for _, row in recs.iterrows():
-        col_img, col_txt = st.columns([1,5])
+        col_img, col_txt = st.columns([1, 5])
         with col_img:
             if row["Poster_Link"]:
                 st.image(row["Poster_Link"], width=120)
         with col_txt:
-            actors = ", ".join(filter(None, (row[col] for col in ["Star1","Star2","Star3","Star4"]))) or "N/A"
-            overview = row["Overview"][:480].rstrip() + ("…" if len(row["Overview"])>480 else "")
+            actors = ", ".join(filter(None, (row[col] for col in ["Star1", "Star2", "Star3", "Star4"]))) or "N/A"
+            overview = row["Overview"][:480].rstrip() + ("…" if len(row["Overview"]) > 480 else "")
             st.markdown(
                 f"**{row['Series_Title']}**\n\n"
                 f"Released: {row['Released_Year']}  |  IMDb: {row['IMDB_Rating']}⭐\n\n"
@@ -163,8 +190,9 @@ def display_recommendations(title, df, cosine_sim, indices):
                 f"**Overview:** {overview}"
             )
 
+
 ############################################
-# 5. Main Recommender UI
+# 6. Main Recommender UI
 ############################################
 
 def main_app(df, cosine_sim, indices):
@@ -178,24 +206,18 @@ def main_app(df, cosine_sim, indices):
 
     st.text_input("Movie Title:", key="movie_input", on_change=on_enter)
 
+
 ############################################
-# 6. Bootstrap
+# 7. Bootstrap
 ############################################
 
 def run():
-    """Entry point. Shows *only* one screen at a time:
-    1. Login/Sign‑up when the user is **not** authenticated.
-    2. Recommender dashboard once authenticated.
-    """
-
     init_auth_state()
 
     if not st.session_state["logged_in"]:
-        # -------- Login / Sign‑up Screen --------
         login_screen()
-        return  # ensure recommender code below does not execute in this pass
+        return  # Only show one screen per run
 
-    # -------- Recommender Screen --------
     df, cosine_sim, indices = load_data()
     main_app(df, cosine_sim, indices)
 
