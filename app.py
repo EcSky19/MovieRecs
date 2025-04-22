@@ -1,240 +1,253 @@
-import os
-import json
-import stat
-import re
-from types import FunctionType
+# app.py
+import os, json, re, bcrypt, getpass, stat, pathlib
 import pandas as pd
 import streamlit as st
-from passlib.hash import bcrypt
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import linear_kernel
 
-############################################
-# 0. Security Helpers & Utility
-############################################
+###############################################################################
+# 0. ──────────────────────────────  CONSTANTS  ────────────────────────────── #
+###############################################################################
+USER_FILE = pathlib.Path.home() / ".movie_recs_secure" / "users.json"
+USER_FILE.parent.mkdir(parents=True, exist_ok=True)
+PEPPER = os.getenv("MOVIEREC_PEPPER", "").encode()
 
-# --- Safe rerun that works across Streamlit versions ---
+###############################################################################
+# 1. ────────────────────────────  USER STORAGE  ──────────────────────────── #
+###############################################################################
+def load_users() -> dict:
+    if USER_FILE.exists():
+        with open(USER_FILE, "r", encoding="utf-8") as f:
+            try:
+                return json.load(f)
+            except json.JSONDecodeError:
+                return {}
+    return {}
 
-def safe_rerun():
-    """Trigger a rerun if Streamlit provides a rerun API; otherwise noop."""
-    _rerun: FunctionType | None = getattr(st, "experimental_rerun", None) or getattr(st, "rerun", None)
-    if _rerun:
-        try:
-            _rerun()
-        except Exception:
-            pass  # Ignore outside Streamlit runtime
-
-# -------------------------------------------------------
-
-############################################
-
-# Location of the on‑disk credential store (outside web root)
-APP_DIR = os.path.expanduser("~/.movie_recs_secure")
-USERS_FILE = os.path.join(APP_DIR, "users.json")
-
-# Optional PEPPER (set an env‑var in production for extra security)
-PEPPER = os.environ.get("MOVIEREC_PEPPER", "")
-
-# Username policy: 3‑32 chars, alphanumerics, underscores, dashes
-USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_\-]{3,32}$")
-
-
-def ensure_storage_dir() -> None:
-    os.makedirs(APP_DIR, mode=0o700, exist_ok=True)
-
-
-def secure_save(path: str, data: dict) -> None:
-    """Write JSON with 0600 permissions (owner‑read/write only)."""
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf‑8") as f:
-        json.dump(data, f, indent=2)
-    os.replace(tmp, path)
-    os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)  # 0o600
-
-
-############################################
-# 1. Password Hashing
-############################################
+def save_users(users: dict) -> None:
+    tmp = USER_FILE.with_suffix(".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(users, f, indent=2)
+    tmp.replace(USER_FILE)
+    USER_FILE.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0600
 
 def hash_pw(password: str) -> str:
-    """Hash a password using bcrypt + optional pepper."""
-    return bcrypt.using(rounds=12).hash(password + PEPPER)
-
+    return bcrypt.hashpw(password.encode() + PEPPER, bcrypt.gensalt()).decode()
 
 def verify_pw(password: str, hashed: str) -> bool:
     try:
-        return bcrypt.verify(password + PEPPER, hashed)
-    except Exception:
+        return bcrypt.checkpw(password.encode() + PEPPER, hashed.encode())
+    except ValueError:
         return False
 
-
-############################################
-# 2. Persistent User Store
-############################################
-
-def load_user_db():
-    ensure_storage_dir()
-    if os.path.exists(USERS_FILE):
-        try:
-            with open(USERS_FILE, "r", encoding="utf‑8") as f:
-                return json.load(f)
-        except Exception:
-            pass  # Corrupt file — fall through to default
-    # First‑run default admin account (password = admin123 — advise changing)
-    default_users = {"admin": hash_pw("admin123")}
-    secure_save(USERS_FILE, default_users)
-    return default_users
-
-
-def save_user_db(users):
-    try:
-        secure_save(USERS_FILE, users)
-    except Exception:
-        st.warning("⚠️ Failed to save credential store; new accounts won't persist.")
-
-
-############################################
-# 3. Auth Handler (log in / sign up)
-############################################
-
+###############################################################################
+# 2. ────────────────────────  SESSION‑STATE HELPERS  ─────────────────────── #
+###############################################################################
 def init_auth_state():
-    st.session_state.setdefault("users", load_user_db())
     st.session_state.setdefault("logged_in", False)
+    st.session_state.setdefault("username", None)
+    st.session_state.setdefault("users", load_users())
 
+def safe_rerun():
+    # Streamlit < 1.31 lacks experimental_rerun
+    if hasattr(st, "experimental_rerun"):
+        st.experimental_rerun()
+
+###############################################################################
+# 3. ─────────────────────────────  AUTH UI  ──────────────────────────────── #
+###############################################################################
+def strong_pwd(pwd: str) -> bool:
+    return len(pwd) >= 8
 
 def login_screen():
-    st.title("Secure Movie Recommender — Sign In / Sign Up")
-    mode = st.radio("Choose an option", ["Log in", "Sign up"], horizontal=True, key="auth_mode")
+    mode = st.radio(
+        "Choose an option",
+        ["Log in", "Sign up", "Forgot password"],
+        horizontal=True,
+        key="auth_mode",
+    )
+    users = st.session_state["users"]
 
     if mode == "Log in":
-        username = st.text_input("Username", key="login_user")
-        password = st.text_input("Password", type="password", key="login_pass")
-        if st.button("Log in", key="login_btn"):
-            users = st.session_state["users"]
-            if username in users and verify_pw(password, users[username]):
-                st.session_state["logged_in"] = True
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        if st.button("Log in"):
+            if username in users and verify_pw(password, users[username]["pw_hash"]):
+                st.session_state.update(logged_in=True, username=username)
                 safe_rerun()
             else:
                 st.error("Incorrect username or password.")
 
-    else:  # Sign up
-        new_user = st.text_input("Choose a username", key="signup_user")
-        new_pass = st.text_input("Choose a password", type="password", key="signup_pass")
-        if st.button("Create account", key="signup_btn"):
-            if not USERNAME_PATTERN.fullmatch(new_user or ""):
-                st.error("Username must be 3‑32 chars: letters, numbers, _ or -")
-            elif len(new_pass) < 8:
-                st.error("Password must be at least 8 characters long.")
-            elif new_user in st.session_state["users"]:
-                st.error("Username already exists. Pick another.")
+    elif mode == "Sign up":
+        username = st.text_input("Choose a username")
+        email = st.text_input("E‑mail")
+        password = st.text_input("Password", type="password")
+        confirm = st.text_input("Confirm password", type="password")
+        if st.button("Create account"):
+            if username in users:
+                st.error("Username already exists.")
+            elif not re.fullmatch(r"[^@]+@[^@]+\.[^@]+", email):
+                st.error("Invalid e‑mail.")
+            elif password != confirm:
+                st.error("Passwords do not match.")
+            elif not strong_pwd(password):
+                st.error("Password must be at least 8 characters.")
             else:
-                st.session_state["users"][new_user] = hash_pw(new_pass)
-                save_user_db(st.session_state["users"])
-                st.success("Account created! You are now logged in.")
-                st.session_state["logged_in"] = True
+                users[username] = {
+                    "email": email,
+                    "pw_hash": hash_pw(password),
+                    "likes": [],
+                }
+                save_users(users)
+                st.success("Account created – you’re now logged in!")
+                st.session_state.update(logged_in=True, username=username)
                 safe_rerun()
 
+    else:  # Forgot password
+        username = st.text_input("Username")
+        email = st.text_input("Registered e‑mail")
+        new_pwd = st.text_input("New password", type="password")
+        confirm = st.text_input("Confirm new password", type="password")
+        if st.button("Reset password"):
+            if (
+                username in users
+                and users[username]["email"].lower() == email.lower()
+            ):
+                if new_pwd != confirm:
+                    st.error("Passwords do not match.")
+                elif not strong_pwd(new_pwd):
+                    st.error("Password must be at least 8 characters.")
+                else:
+                    users[username]["pw_hash"] = hash_pw(new_pwd)
+                    save_users(users)
+                    st.success("Password reset – you can log in now.")
+            else:
+                st.error("Username / e‑mail mismatch.")
 
-############################################
-# 4. Movie Recommender (unchanged logic)
-############################################
-
-# --- Weighting & similarity helpers (same as before) ---
-
+###############################################################################
+# 4. ─────────────────────  MOVIE DATA & SIMILARITY  ──────────────────────── #
+###############################################################################
 def create_weighted_features(row):
-    try:
-        rating_int = int(round(float(row["IMDB_Rating"])))
-    except ValueError:
-        rating_int = 0
-    try:
-        meta_int = int(round(float(row.get("Meta_score", 0)) / 10))
-    except ValueError:
-        meta_int = 0
-    rating_tokens = " rating" * rating_int
-    metascore_tokens = " metascore" * meta_int
-    genre_tokens = (" " + row["Genre"]) * 3
-    director_tokens = " " + row["Director"]
-    star_tokens = "".join(" " + row[c] for c in ["Star1", "Star2", "Star3", "Star4"])
-    return (rating_tokens + metascore_tokens + genre_tokens + director_tokens + star_tokens).strip()
+    """Turn each movie’s numeric + categorical attributes into a token string
+    that the TF‑IDF vectoriser can consume.  All numeric conversions are wrapped
+    in try/except so bad strings (e.g. '') never crash the app."""
+    def safe_int(val, divisor=1):
+        try:
+            return int(round(float(val) / divisor))
+        except (ValueError, TypeError):
+            return 0
 
+    rating_tokens    = " rating"    * safe_int(row.get("IMDB_Rating", 0))
+    metascore_tokens = " metascore" * safe_int(row.get("Meta_score", 0), divisor=10)
 
+    genre_tokens    = (" " + row.get("Genre",    "")) * 3
+    director_tokens = (" " + row.get("Director", ""))
+    star_tokens     = (" " + row.get("Star1",    ""))
+
+    return (rating_tokens + metascore_tokens + genre_tokens +
+            director_tokens + star_tokens).strip()
+
+@st.cache_resource(show_spinner=True)
 def load_data():
     DATA_PATH = (
         "/Users/ethancoskay/.cache/kagglehub/datasets/harshitshankhdhar/"
-        "imdb-dataset-of-top-1000-movies-and-tv-shows/versions/1"
+        "imdb-dataset-of-top-1000-movies-and-tv-shows/versions/1/imdb_top_1000.csv"
     )
-    csv_path = os.path.join(DATA_PATH, "imdb_top_1000.csv")
-    df = pd.read_csv(csv_path)
-    for col in [
-        "Series_Title","Released_Year","Genre","IMDB_Rating","Director",
-        "Star1","Star2","Star3","Star4","Poster_Link","Meta_score","Overview"]:
-        df[col] = df.get(col, "").fillna("")
-    df["weighted_features"] = df.apply(create_weighted_features, axis=1)
+    df = pd.read_csv(DATA_PATH)
+    df["IMDB_Rating"] = pd.to_numeric(df["IMDB_Rating"], errors="coerce").fillna(0)
+    df["Meta_score"]  = pd.to_numeric(df.get("Meta_score"), errors="coerce").fillna(0)
+
+    df.fillna("", inplace=True)
+    df["weighted"] = df.apply(create_weighted_features, axis=1)
     tfidf = TfidfVectorizer(stop_words="english")
-    cosine_sim = linear_kernel(tfidf.fit_transform(df["weighted_features"]), tfidf.fit_transform(df["weighted_features"]))
-    df["Series_Title_lower"] = df["Series_Title"].str.lower()
-    indices = pd.Series(df.index, index=df["Series_Title_lower"]).drop_duplicates()
-    return df, cosine_sim, indices
+    mat = tfidf.fit_transform(df["weighted"])
+    cos = linear_kernel(mat, mat)
+    idx = pd.Series(df.index, index=df["Series_Title"].str.lower()).drop_duplicates()
+    return df, cos, idx
 
-
-def get_recommendations(title, df, cosine_sim, indices):
+def recommend(title, df, cos, idx):
     t = title.lower().strip()
-    if t not in indices:
+    if t not in idx:
         return None
-    idx = indices[t]
-    sim_scores = sorted(enumerate(cosine_sim[idx]), key=lambda x: x[1], reverse=True)[1:6]
-    return df.iloc[[i[0] for i in sim_scores]][[
-        "Series_Title","Released_Year","Director","Star1","Star2","Star3","Star4",
-        "IMDB_Rating","Genre","Overview","Poster_Link"
-    ]].reset_index(drop=True)
+    i = idx[t]
+    scores = sorted(
+        enumerate(cos[i]), key=lambda x: x[1], reverse=True
+    )[1:6]  # top‑5
+    return df.iloc[[s[0] for s in scores]].reset_index(drop=True)
 
+###############################################################################
+# 5. ─────────────────────────  RECOMMENDER UI  ───────────────────────────── #
+###############################################################################
+def recommender_ui(df, cos, idx):
+    st.title("🎬 Movie Recommender")
 
-def display_recs(title, df, cosine_sim, indices):
-    recs = get_recommendations(title, df, cosine_sim, indices)
-    if recs is None:
-        st.warning(f"'{title}' not found.")
-        return
-    st.success(f"Movies similar to '{title}':")
-    for _, row in recs.iterrows():
-        col_img, col_txt = st.columns([1,5])
-        with col_img:
-            if row["Poster_Link"]:
-                st.image(row["Poster_Link"], width=120)
-        with col_txt:
-            actors = ", ".join(filter(None, [row[c] for c in ["Star1","Star2","Star3","Star4"]])) or "N/A"
-            overview = row["Overview"][:480].rstrip() + ("…" if len(row["Overview"])>480 else "")
-            st.markdown(
-                f"**{row['Series_Title']}**\n\n"
-                f"Released: {row['Released_Year']} | IMDb: {row['IMDB_Rating']}⭐\n\n"
-                f"Director: {row['Director']}\n\n"
-                f"Actors: {actors}\n\n"
-                f"Genre: {row['Genre']}\n\n"
-                f"**Overview:** {overview}"
-            )
+    # ── search box
+    movie = st.text_input("Enter a movie you love:")
+    if st.session_state.get("trigger_rec", False) or st.button(
+        "Recommend", key="recommend_btn"
+    ):
+        st.session_state["trigger_rec"] = False
+        recs = recommend(movie, df, cos, idx)
+        if recs is None:
+            st.warning(f"‘{movie}’ not found.")
+        else:
+            st.success(f"Movies similar to ‘{movie}’")
+            for _, r in recs.iterrows():
+                col1, col2 = st.columns([1, 5])
+                with col1:
+                    if r["Poster_Link"]:
+                        st.image(r["Poster_Link"], width=110)
+                with col2:
+                    st.markdown(
+                        f"**{r['Series_Title']}**\n\n"
+                        f"Released: {r['Released_Year']} | IMDb {r['IMDB_Rating']}⭐\n\n"
+                        f"Director: {r['Director']}  \n"
+                        f"Stars: {', '.join([r.get(f'Star{i}', '') for i in range(1,5) if r.get(f'Star{i}')])}  \n"
+                        f"Genre: {r['Genre']}  \n"
+                        f"Overview: {r['Overview']}"
+                    )
+                    like_key = f"like_{r['Series_Title']}"
+                    if st.button("★ Like", key=like_key):
+                        usr = st.session_state["username"]
+                        users = st.session_state["users"]
+                        if r["Series_Title"] not in users[usr]["likes"]:
+                            users[usr]["likes"].append(r["Series_Title"])
+                            save_users(users)
+                            st.toast("Added to your likes!", icon="❤️")
 
+    # ── sidebar with liked movies
+    st.sidebar.header(f"👤 {st.session_state['username']}")
+    likes = st.session_state["users"][st.session_state["username"]]["likes"]
+    if likes:
+        st.sidebar.subheader("Your liked movies")
+        for m in likes:
+            st.sidebar.write(f"• {m}")
+    else:
+        st.sidebar.info("No liked movies yet – show some ❤️!")
 
-def recommender_ui(df, cosine_sim, indices):
-    st.title("🎬 Secure Movie Recommender")
-    st.write("Type a movie you love and press **Enter** to see five similar picks.")
-    def on_enter():
-        t = st.session_state.get("movie_query", "").strip()
-        if t:
-            display_recs(t, df, cosine_sim, indices)
-    st.text_input("Movie Title", key="movie_query", on_change=on_enter)
-
-
-############################################
-# 5. App Entrypoint
-############################################
-
-def run():
+###############################################################################
+# 6. ─────────────────────────────  MAIN  ─────────────────────────────────── #
+###############################################################################
+def main():
     init_auth_state()
     if not st.session_state["logged_in"]:
         login_screen()
         return
-    df, cosine_sim, indices = load_data()
-    recommender_ui(df, cosine_sim, indices)
 
+    df, cos, idx = load_data()
+    recommender_ui(df, cos, idx)
+
+# capture Enter key on movie field
+def _set_enter_hotkey():
+    if not st.runtime.exists():
+        return
+    from streamlit.runtime.scriptrunner import get_script_run_ctx
+
+    ctx = get_script_run_ctx()
+    if ctx:
+        st.session_state.setdefault("trigger_rec", False)
+        if ctx.request_rerun_data.widget_states.get("MovieRecommender") is not None:
+            st.session_state["trigger_rec"] = True
 
 if __name__ == "__main__":
-    run()
+    main()
