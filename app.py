@@ -2,6 +2,7 @@ import os
 import json
 import stat
 import re
+from types import FunctionType
 import pandas as pd
 import streamlit as st
 from passlib.hash import bcrypt
@@ -9,7 +10,22 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import linear_kernel
 
 ############################################
-# 0. Security Helpers
+# 0. Security Helpers & Utility
+############################################
+
+# --- Safe rerun that works across Streamlit versions ---
+
+def safe_rerun():
+    """Trigger a rerun if Streamlit provides a rerun API; otherwise noop."""
+    _rerun: FunctionType | None = getattr(st, "experimental_rerun", None) or getattr(st, "rerun", None)
+    if _rerun:
+        try:
+            _rerun()
+        except Exception:
+            pass  # Ignore outside Streamlit runtime
+
+# -------------------------------------------------------
+
 ############################################
 
 # Location of the on‑disk credential store (outside web root)
@@ -97,7 +113,7 @@ def login_screen():
             users = st.session_state["users"]
             if username in users and verify_pw(password, users[username]):
                 st.session_state["logged_in"] = True
-                st.experimental_rerun()
+                safe_rerun()
             else:
                 st.error("Incorrect username or password.")
 
@@ -116,7 +132,7 @@ def login_screen():
                 save_user_db(st.session_state["users"])
                 st.success("Account created! You are now logged in.")
                 st.session_state["logged_in"] = True
-                st.experimental_rerun()
+                safe_rerun()
 
 
 ############################################
