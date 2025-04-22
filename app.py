@@ -42,8 +42,9 @@ def create_weighted_features(row):
     metascore_tokens = (" metascore" * meta_int)
     genre_tokens = (" " + row["Genre"]) * 3
     director_tokens = (" " + row["Director"]) * 1
+    star_tokens = (" " + row["Star1"]) * 1
 
-    return (rating_tokens + metascore_tokens + genre_tokens + director_tokens).strip()
+    return (rating_tokens + metascore_tokens + genre_tokens + director_tokens + star_tokens).strip()
 
 ############################################
 # 3. Load Data and Compute Similarity
@@ -56,7 +57,7 @@ def load_data():
 
     df = pd.read_csv(csv_path)
 
-    for col in ["Director", "Genre", "IMDB_Rating", "Meta_score"]:
+    for col in ["Director", "Genre", "IMDB_Rating", "Meta_score", "Star1"]:
         df[col] = df[col].fillna("")
 
     df["weighted_features"] = df.apply(create_weighted_features, axis=1)
