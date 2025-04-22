@@ -16,10 +16,8 @@ def login_screen():
     if st.button("Log in"):
         if username == "admin" and password == "1234":
             st.session_state["logged_in"] = True
-            # We don't call st.experimental_rerun(). Instead:
-            # Just stop the script here so that on the next
-            # user interaction, the app re-runs with new state.
-            st.stop()  # End this script execution now
+            # End this script execution now so that the next rerun picks up the new state
+            st.stop()
         else:
             st.error("Incorrect username or password")
 
@@ -28,6 +26,8 @@ def login_screen():
 ############################################
 
 def create_weighted_features(row):
+    """Create synthetic text features with hand‑tuned weights for rating, metascore,
+    genre, director and main star so that the vectoriser can pick them up."""
     try:
         rating_int = int(round(float(row["IMDB_Rating"])))
     except ValueError:
@@ -57,15 +57,23 @@ def load_data():
 
     df = pd.read_csv(csv_path)
 
-    for col in ["Director", "Genre", "IMDB_Rating", "Meta_score", "Star1"]:
-        df[col] = df[col].fillna("")
+    # Clean up NA fields we rely on later
+    for col in ["Director", "Genre", "IMDB_Rating", "Meta_score", "Star1", "Poster_Link"]:
+        if col in df.columns:
+            df[col] = df[col].fillna("")
+        else:
+            # Back‑stop: if the dataset is missing Poster_Link create an empty column so the rest of the app works
+            if col == "Poster_Link":
+                df[col] = ""
 
+    # Pre‑compute vector representations for similarity search
     df["weighted_features"] = df.apply(create_weighted_features, axis=1)
 
     tfidf = TfidfVectorizer(stop_words="english")
     tfidf_matrix = tfidf.fit_transform(df["weighted_features"])
     cosine_sim = linear_kernel(tfidf_matrix, tfidf_matrix)
 
+    # Speedy lookup from lower‑cased title → index
     df["Series_Title_lower"] = df["Series_Title"].str.lower()
     indices = pd.Series(df.index, index=df["Series_Title_lower"]).drop_duplicates()
 
@@ -75,52 +83,59 @@ def load_data():
 # 4. Recommendation Function
 ############################################
 
-def get_recommendations(title, df, cosine_sim, indices):
-    title_lower = title.lower()
+def get_recommendations(title: str, df: pd.DataFrame, cosine_sim, indices):
+    """Return a dataframe with the 5 most similar movies, including their poster link."""
+    title_lower = title.lower().strip()
     if title_lower not in indices:
         return None
 
     idx = indices[title_lower]
     sim_scores = list(enumerate(cosine_sim[idx]))
     sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
-    sim_scores = sim_scores[1:]
-    top_indices = [i[0] for i in sim_scores[:5]]
-    return df.iloc[top_indices]["Series_Title"]
+    top_indices = [i[0] for i in sim_scores[1:6]]  # Skip first (the movie itself)
+
+    return df.iloc[top_indices][["Series_Title", "Poster_Link"]].reset_index(drop=True)
 
 ############################################
 # 5. Main App
 ############################################
 
 def main_app(df, cosine_sim, indices):
-    st.title("Movie Recommender")
-    st.write("Enter a movie title and get similar recommendations.")
+    st.title("🎬 Movie Recommender")
+    st.write("Enter a movie title and we'll surface 5 similar films — posters included!")
 
     user_movie = st.text_input("Movie Title:", value="")
 
     if st.button("Recommend"):
-        recommendations = get_recommendations(user_movie, df, cosine_sim, indices)
-        if recommendations is None:
+        recs_df = get_recommendations(user_movie, df, cosine_sim, indices)
+        if recs_df is None:
             st.warning(f"'{user_movie}' not found in dataset.")
         else:
             st.success(f"Movies similar to '{user_movie}':")
-            for i, rec in enumerate(recommendations, start=1):
-                st.write(f"{i}. {rec}")
+            for _, row in recs_df.iterrows():
+                col_img, col_text = st.columns([1, 4])
+                with col_img:
+                    if row["Poster_Link"]:
+                        st.image(row["Poster_Link"], width=120)
+                with col_text:
+                    st.markdown(f"**{row['Series_Title']}**")
 
-def main():
-    # Initialize "logged_in" in session_state if it doesn't exist
+############################################
+# 6. App bootstrap
+############################################
+
+def run():
+    # Initialise session key on first run
     if "logged_in" not in st.session_state:
         st.session_state["logged_in"] = False
 
     if not st.session_state["logged_in"]:
-        # Show the login screen
         login_screen()
-        # If the user does NOT click the button, script continues
-        # So we call st.stop() to not load data below yet
+        # Stop the script so that Streamlit re‑runs after any user interaction
         st.stop()
     else:
-        # Already logged in, so load data & show the recommender
         df, cosine_sim, indices = load_data()
         main_app(df, cosine_sim, indices)
 
 if __name__ == "__main__":
-    main()
+    run()
