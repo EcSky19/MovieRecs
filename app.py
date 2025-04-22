@@ -178,31 +178,40 @@ def recommend(title, df, cos, idx):
 ###############################################################################
 # 5. ─────────────────────────  RECOMMENDER UI  ───────────────────────────── #
 ###############################################################################
+# ─────────────────────────────────────────────────────────────────────────────
+# Add this helper *above* your recommender_ui definition:
+def _trigger_recs():
+    # Called when user types Enter in the text_input
+    st.session_state["trigger_rec"] = True
+    # Clear any old recs so we regenerate
+    st.session_state.pop("last_recs", None)
+# ─────────────────────────────────────────────────────────────────────────────
+
 def recommender_ui(df, cos, idx):
     st.title("🎬 Movie Recommender")
 
-    movie = st.text_input("Enter a movie you love:", key="search_movie")
     username = st.session_state["username"]
     users    = st.session_state["users"]
 
-    # ── 1) Movie Info Card ─────────────────────────────────────────
+    # ── 1) SEARCH BOX: on_change fires when Enter is pressed ────────────────
+    movie = st.text_input(
+        "Enter a movie you love:",
+        key="search_movie",
+        on_change=_trigger_recs
+    )
+
+    # ── 2) MOVIE INFO CARD ──────────────────────────────────────────────────
     if movie:
-        # find exact match (case‑insensitive)
         match = df[df["Series_Title"].str.lower() == movie.lower().strip()]
         if not match.empty:
             r = match.iloc[0]
             st.subheader("📖 Movie Info")
-            col1, col2 = st.columns([1, 5])
-            with col1:
+            c1, c2 = st.columns([1, 5])
+            with c1:
                 if r["Poster_Link"]:
                     st.image(r["Poster_Link"], width=120)
-            with col2:
-                # details + overview
-                stars = [
-                    r.get(f"Star{i}", "")
-                    for i in range(1, 5)
-                    if r.get(f"Star{i}", "")
-                ]
+            with c2:
+                stars = [r.get(f"Star{i}", "") for i in range(1,5) if r.get(f"Star{i}")]
                 st.markdown(
                     f"**{r['Series_Title']}**\n\n"
                     f"Released: {r['Released_Year']} | IMDb {r['IMDB_Rating']}⭐\n\n"
@@ -211,23 +220,30 @@ def recommender_ui(df, cos, idx):
                     f"Genre: {r['Genre']}\n\n"
                     f"**Overview:**  \n{r.get('Overview','No overview available.')}"
                 )
-                # own like‑button for the info card
                 info_like_key = f"info_like_{r['Series_Title']}"
                 if st.button("★ Like this movie", key=info_like_key):
-                    if r["Series_Title"] not in users[username]["likes"]:
-                        users[username]["likes"].append(r["Series_Title"])
+                    likes = users[username]["likes"]
+                    if r["Series_Title"] not in likes:
+                        likes.append(r["Series_Title"])
                         save_users(users)
                         st.toast("Added to your likes!", icon="❤️")
         else:
             st.info(f"‘{movie}’ not found in our database.")
 
-    st.markdown("---")  # separator between info and recs
+    st.markdown("---")
 
-    # ── 2) Recommendation Section ───────────────────────────────────
-    if st.button("Recommend", key="recommend_btn"):
+    # ── 3) GENERATE & STORE RECS ───────────────────────────────────────────
+    # Fires on Recommend button OR on Enter (trigger_rec)
+    if st.button("Recommend", key="recommend_btn") or st.session_state.get("trigger_rec"):
+        st.session_state["trigger_rec"] = False
         recs = recommend(movie, df, cos, idx)
-        if recs is None:
-            st.warning(f"‘{movie}’ not found; can’t generate recommendations.")
+        st.session_state["last_recs"] = recs
+
+    # ── 4) DISPLAY RECS PERSISTENTLY ──────────────────────────────────────
+    recs = st.session_state.get("last_recs", None)
+    if recs is not None:
+        if recs.empty:
+            st.warning(f"‘{movie}’ not found; can’t recommend similar titles.")
         else:
             st.success(f"Movies similar to ‘{movie}’")
             for _, r in recs.iterrows():
@@ -236,11 +252,7 @@ def recommender_ui(df, cos, idx):
                     if r["Poster_Link"]:
                         st.image(r["Poster_Link"], width=110)
                 with c2:
-                    stars = [
-                        r.get(f"Star{i}", "")
-                        for i in range(1, 5)
-                        if r.get(f"Star{i}", "")
-                    ]
+                    stars = [r.get(f"Star{i}", "") for i in range(1,5) if r.get(f"Star{i}")]
                     st.markdown(
                         f"**{r['Series_Title']}**\n\n"
                         f"Released: {r['Released_Year']} | IMDb {r['IMDB_Rating']}⭐\n\n"
@@ -251,12 +263,13 @@ def recommender_ui(df, cos, idx):
                     )
                     rec_like_key = f"rec_like_{r['Series_Title']}"
                     if st.button("★ Like", key=rec_like_key):
-                        if r["Series_Title"] not in users[username]["likes"]:
-                            users[username]["likes"].append(r["Series_Title"])
+                        likes = users[username]["likes"]
+                        if r["Series_Title"] not in likes:
+                            likes.append(r["Series_Title"])
                             save_users(users)
                             st.toast("Added to your likes!", icon="❤️")
 
-    # ── 3) Sidebar: show updated likes immediately ─────────────────
+    # ── 5) SIDEBAR: IMMEDIATELY SHOW UPDATED LIKES ─────────────────────────
     st.sidebar.header(f"👤 {username}")
     liked = users[username]["likes"]
     if liked:
@@ -265,7 +278,6 @@ def recommender_ui(df, cos, idx):
             st.sidebar.write(f"• {title}")
     else:
         st.sidebar.info("No liked movies yet – show some ❤️!")
-
 
 ###############################################################################
 # 6. ─────────────────────────────  MAIN  ─────────────────────────────────── #
