@@ -5,20 +5,64 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import linear_kernel
 
 ############################################
-# 1. Simple Login Handler (No experimental_rerun)
+# 1. Auth Handler (Log in & Sign up)
 ############################################
 
-def login_screen():
-    st.title("Login")
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
+def init_auth_state():
+    """Ensure auth‑related keys exist in session_state."""
+    if "users" not in st.session_state:
+        # pre‑seed with an admin account
+        st.session_state["users"] = {"admin": "1234"}
+    if "logged_in" not in st.session_state:
+        st.session_state["logged_in"] = False
 
-    if st.button("Log in"):
-        if username == "admin" and password == "1234":
-            st.session_state["logged_in"] = True
-            st.stop()  # rerun with new state on next interaction
-        else:
-            st.error("Incorrect username or password")
+
+def login_screen():
+    """Render Log in / Sign up UI.
+
+    * Radio selector lets user toggle between the two modes.
+    * After a successful log in or sign up we mark `logged_in` and rerun so
+      the main app can render immediately without an extra click."""
+
+    st.title("Welcome")
+    mode = st.radio("Choose an option", ["Log in", "Sign up"], horizontal=True)
+
+    if mode == "Log in":
+        with st.form("login_form", clear_on_submit=False):
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Log in")
+
+        if submitted:
+            users = st.session_state["users"]
+            if username in users and users[username] == password:
+                st.session_state["logged_in"] = True
+                try:
+                    st.experimental_rerun()
+                except RuntimeError:
+                    pass
+            else:
+                st.error("Invalid credentials. Please try again.")
+
+    else:  # Sign up
+        with st.form("signup_form", clear_on_submit=False):
+            new_user = st.text_input("Choose a username")
+            new_pass = st.text_input("Choose a password", type="password")
+            submitted = st.form_submit_button("Create account")
+
+        if submitted:
+            if not new_user or not new_pass:
+                st.error("Username and password cannot be empty.")
+            elif new_user in st.session_state["users"]:
+                st.error("Username already exists. Please pick another.")
+            else:
+                st.session_state["users"][new_user] = new_pass
+                st.success("Account created! You are now logged in.")
+                st.session_state["logged_in"] = True
+                try:
+                    st.experimental_rerun()
+                except RuntimeError:
+                    pass
 
 ############################################
 # 2. Weighted Feature Creation
@@ -43,7 +87,7 @@ def create_weighted_features(row):
     director_tokens = (" " + row["Director"]) * 1
 
     # Include all actor names to improve similarity on casts
-    star_tokens = "".join([(" " + row[col]) for col in ["Star1", "Star2", "Star3", "Star4"]])
+    star_tokens = "".join(" " + row[col] for col in ["Star1", "Star2", "Star3", "Star4"])
 
     return (rating_tokens + metascore_tokens + genre_tokens + director_tokens + star_tokens).strip()
 
@@ -109,9 +153,7 @@ def display_recommendations(title: str, df: pd.DataFrame, cosine_sim, indices):
                 if row["Poster_Link"]:
                     st.image(row["Poster_Link"], width=120)
             with col_text:
-                actors = ", ".join(
-                    filter(None, [row.get(col, "") for col in ["Star1", "Star2", "Star3", "Star4"]])
-                ) or "N/A"
+                actors = ", ".join(filter(None, (row.get(col, "") for col in ["Star1", "Star2", "Star3", "Star4"]))) or "N/A"
 
                 overview = row.get("Overview", "")
                 if len(overview) > 500:
@@ -133,18 +175,19 @@ def display_recommendations(title: str, df: pd.DataFrame, cosine_sim, indices):
 
 def main_app(df, cosine_sim, indices):
     st.title("🎬 Movie Recommender")
-    st.write("Enter a movie you love and press **Enter** to get five similar gems – complete with posters and key details.")
+    st.write(
+        "Enter a movie you love and press **Enter** to get five similar gems – complete with posters and key details."
+    )
 
     def recommend_callback():
         title = st.session_state.get("user_movie", "").strip()
         if title:
             display_recommendations(title, df, cosine_sim, indices)
 
-    # Pressing Enter in this field triggers recommend_callback
     st.text_input("Movie Title:", key="user_movie", on_change=recommend_callback)
 
 ############################################
-# 6. Recommendation Logic (unchanged)
+# 6. Recommendation Logic
 ############################################
 
 def get_recommendations(title: str, df: pd.DataFrame, cosine_sim, indices):
@@ -181,15 +224,15 @@ def get_recommendations(title: str, df: pd.DataFrame, cosine_sim, indices):
 ############################################
 
 def run():
-    if "logged_in" not in st.session_state:
-        st.session_state["logged_in"] = False
+    init_auth_state()
 
     if not st.session_state["logged_in"]:
         login_screen()
-        st.stop()
-    else:
-        df, cosine_sim, indices = load_data()
-        main_app(df, cosine_sim, indices)
+        if not st.session_state["logged_in"]:
+            st.stop()
+
+    df, cosine_sim, indices = load_data()
+    main_app(df, cosine_sim, indices)
 
 if __name__ == "__main__":
     run()
