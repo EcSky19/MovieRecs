@@ -60,12 +60,8 @@ def strong_pwd(pwd: str) -> bool:
     return len(pwd) >= 8
 
 def login_screen():
-    mode = st.radio(
-        "Choose an option",
-        ["Log in", "Sign up", "Forgot password"],
-        horizontal=True,
-        key="auth_mode",
-    )
+    mode = st.radio("Choose an option", ["Log in", "Sign up", "Forgot password"],
+                    horizontal=True, key="auth_mode")
     users = st.session_state["users"]
 
     if mode == "Log in":
@@ -73,8 +69,8 @@ def login_screen():
         password = st.text_input("Password", type="password")
         if st.button("Log in"):
             if username in users and verify_pw(password, users[username]["pw_hash"]):
-                st.session_state.update(logged_in=True, username=username)
-                safe_rerun()
+                st.session_state["logged_in"] = True
+                st.session_state["username"]  = username
             else:
                 st.error("Incorrect username or password.")
 
@@ -271,11 +267,18 @@ def recommender_ui(df, cos, idx):
 
     # ── 5) SIDEBAR: IMMEDIATELY SHOW UPDATED LIKES ─────────────────────────
     st.sidebar.header(f"👤 {username}")
-    liked = users[username]["likes"]
-    if liked:
+    likes = users[username]["likes"]
+    if likes:
         st.sidebar.subheader("Your liked movies")
-        for title in liked:
-            st.sidebar.write(f"• {title}")
+        # iterate over a copy so we can remove safely
+        for title in likes.copy():
+            col1, col2 = st.sidebar.columns([0.8, 0.2])
+            col1.write(f"• {title}")
+            # “Remove” button
+            if col2.button("✂️", key=f"unlike_{title}"):
+                likes.remove(title)
+                save_users(users)
+                st.toast(f"Removed '{title}' from your likes.", icon="🗑️")
     else:
         st.sidebar.info("No liked movies yet – show some ❤️!")
 
@@ -284,12 +287,12 @@ def recommender_ui(df, cos, idx):
 ###############################################################################
 def main():
     init_auth_state()
+
     if not st.session_state["logged_in"]:
         login_screen()
-        return
-
-    df, cos, idx = load_data()
-    recommender_ui(df, cos, idx)
+    else:
+        df, cos, idx = load_data()
+        recommender_ui(df, cos, idx)
 
 # capture Enter key on movie field
 def _set_enter_hotkey():
