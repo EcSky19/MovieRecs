@@ -5,6 +5,7 @@ import streamlit as st
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import linear_kernel
 
+
 ###############################################################################
 # 0. ──────────────────────────────  CONSTANTS  ────────────────────────────── #
 ###############################################################################
@@ -71,6 +72,9 @@ def login_screen():
             if username in users and verify_pw(password, users[username]["pw_hash"]):
                 st.session_state["logged_in"] = True
                 st.session_state["username"]  = username
+                st.session_state["logged_in"] = True
+                st.session_state["username"]  = username
+                safe_rerun()
             else:
                 st.error("Incorrect username or password.")
 
@@ -117,6 +121,7 @@ def login_screen():
                     users[username]["pw_hash"] = hash_pw(new_pwd)
                     save_users(users)
                     st.success("Password reset – you can log in now.")
+                safe_rerun()
             else:
                 st.error("Username / e‑mail mismatch.")
 
@@ -223,6 +228,7 @@ def recommender_ui(df, cos, idx):
                         likes.append(r["Series_Title"])
                         save_users(users)
                         st.toast("Added to your likes!", icon="❤️")
+                        safe_rerun()
         else:
             st.info(f"‘{movie}’ not found in our database.")
 
@@ -264,6 +270,7 @@ def recommender_ui(df, cos, idx):
                             likes.append(r["Series_Title"])
                             save_users(users)
                             st.toast("Added to your likes!", icon="❤️")
+                            safe_rerun()
 
     # ── 5) SIDEBAR: IMMEDIATELY SHOW UPDATED LIKES ─────────────────────────
     st.sidebar.header(f"👤 {username}")
@@ -279,6 +286,7 @@ def recommender_ui(df, cos, idx):
                 likes.remove(title)
                 save_users(users)
                 st.toast(f"Removed '{title}' from your likes.", icon="🗑️")
+                safe_rerun()
     else:
         st.sidebar.info("No liked movies yet – show some ❤️!")
 

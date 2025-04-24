@@ -1,0 +1,40 @@
+--- app.py
++++ app.py
+@@ def login_screen():
+-        if st.button("Log in"):
++        if st.button("Log in"):
+             if username in users and verify_pw(password, users[username]["pw_hash"]):
+                 st.session_state["logged_in"] = True
+                 st.session_state["username"]  = username
++                safe_rerun()
+             else:
+                 st.error("Incorrect username or password.")
+@@ def login_screen():
+-                        st.success("Password reset – you can log in now.")
++                        st.success("Password reset – you can log in now.")
++                        safe_rerun()
+@@ def recommender_ui(df, cos, idx):
+-                    if st.button("★ Like this movie", key=info_like_key):
++                    if st.button("★ Like this movie", key=info_like_key):
+                         likes = users[username]["likes"]
+                         if r["Series_Title"] not in likes:
+                             likes.append(r["Series_Title"])
+                             save_users(users)
+                             st.toast("Added to your likes!", icon="❤️")
++                        safe_rerun()
+@@ def recommender_ui(df, cos, idx):
+-                    if st.button("★ Like", key=rec_like_key):
++                    if st.button("★ Like", key=rec_like_key):
+                         likes = users[username]["likes"]
+                         if r["Series_Title"] not in likes:
+                             likes.append(r["Series_Title"])
+                             save_users(users)
+                             st.toast("Added to your likes!", icon="❤️")
++                        safe_rerun()
+@@ def recommender_ui(df, cos, idx):
+-            if col2.button("✂️", key=f"unlike_{title}"):
++            if col2.button("✂️", key=f"unlike_{title}"):
+                 likes.remove(title)
+                 save_users(users)
+                 st.toast(f"Removed '{title}' from your likes.", icon="🗑️")
++                safe_rerun()
