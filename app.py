@@ -16,7 +16,6 @@ PEPPER = os.getenv("MOVIEREC_PEPPER", "").encode()
 ###############################################################################
 # 1. ────────────────────────────  USER STORAGE  ──────────────────────────── #
 ###############################################################################
-
 def load_users() -> dict:
     if USER_FILE.exists():
         with open(USER_FILE, "r", encoding="utf-8") as f:
@@ -26,19 +25,16 @@ def load_users() -> dict:
                 return {}
     return {}
 
-
 def save_users(users: dict) -> None:
     tmp = USER_FILE.with_suffix(".tmp")
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(users, f, indent=2)
     tmp.replace(USER_FILE)
-    USER_FILE.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0600
-
+    USER_FILE.chmod(stat.S_IRUSR | stat.S_IWUSR)
 
 def hash_pw(password: str) -> str:
     import bcrypt
     return bcrypt.hashpw(password.encode() + PEPPER, bcrypt.gensalt()).decode()
-
 
 def verify_pw(password: str, hashed: str) -> bool:
     import bcrypt
@@ -48,30 +44,69 @@ def verify_pw(password: str, hashed: str) -> bool:
         return False
 
 ###############################################################################
-# 2. ────────────────────────  SESSION‑STATE HELPERS  ─────────────────────── #
+# 2. ────────────────────────  SESSION-STATE HELPERS  ─────────────────────── #
 ###############################################################################
-
 def init_auth_state():
     st.session_state.setdefault("logged_in", False)
     st.session_state.setdefault("username", None)
     st.session_state.setdefault("users", load_users())
-
+    st.session_state.setdefault("show_login", False)
 
 def safe_rerun():
-    # Streamlit < 1.31 lacks experimental_rerun
     if hasattr(st, "experimental_rerun"):
         st.experimental_rerun()
 
 ###############################################################################
-# 3. ─────────────────────────────  AUTH UI  ──────────────────────────────── #
+# 3. ───────────────────────────  WELCOME UI  ────────────────────────────── #
 ###############################################################################
+def welcome_screen():
+    # Display logo and a centered, large orange Get Started button
+    st.markdown("""
+    <style>
+    .welcome-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        margin: 0;
+        padding: 0;
+        background-color: #000;
+    }
+    .welcome-logo {
+        max-width: 300px;
+        margin-bottom: 40px;
+    }
+    .welcome-container .stButton > button {
+        padding: 20px 60px !important;
+        font-size: 28px !important;
+        background-color: #FFA500 !important;
+        color: #000 !important;
+        border: none !important;
+        border-radius: 10px !important;
+        cursor: pointer;
+    }
+    .welcome-container .stButton > button:hover {
+        background-color: #e69500 !important;
+    }
+    </style>
+    <div class="welcome-container">
+        <img src="/mnt/data/ChatGPT Image Apr 29, 2025, 11_13_51 AM.png" class="welcome-logo" />
+    """, unsafe_allow_html=True)
 
+    # Streamlit button inside the styled container
+    if st.button("Get Started!", key="welcome_get_started"):
+        st.session_state["show_login"] = True
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+###############################################################################
+# 4. ─────────────────────────────  AUTH UI  ──────────────────────────────── #
+###############################################################################
 def strong_pwd(pwd: str) -> bool:
     return len(pwd) >= 8
 
-
 def login_screen():
-    # --- Inject dark-themed CSS and container/background ---
     st.markdown("""
     <style>
     .login-container {
@@ -79,7 +114,7 @@ def login_screen():
         align-items: center;
         justify-content: center;
         height: 100vh;
-        background-image: url('https://example.com/your-background.jpg');
+        background-image: url('https://example.com/login-bg.jpg');
         background-size: cover;
     }
     .login-box {
@@ -88,39 +123,20 @@ def login_screen():
         border-radius: 10px;
         width: 400px;
         box-shadow: 0 0 10px rgba(0,0,0,0.5);
-    }
-    .login-box h2, .login-box h3 {
         color: #FAFAFA;
-        text-align: center;
-        margin-bottom: 20px;
     }
-    .login-box .stRadio>div {
-        margin-bottom: 20px;
+    .login-box input {
+        width:100%;padding:10px;margin-bottom:15px;border:none;border-radius:5px;
     }
-    .login-box .stTextInput>div>div>input {
-        width: 100%;
-        padding: 10px;
-        margin-bottom: 15px;
-        border: none;
-        border-radius: 5px;
+    .login-box .stButton > button {
+        width:100%;padding:10px;background-color:#1f77b4;color:white;border:none;border-radius:5px;font-size:16px;cursor:pointer;
     }
-    .login-box .stButton button {
-        width: 100%;
-        padding: 10px;
-        background-color: #1f77b4;
-        color: white;
-        border: none;
-        border-radius: 5px;
-        cursor: pointer;
-        font-size: 16px;
-    }
-    .login-box .stButton button:hover {
-        background-color: #1b5fa7;
+    .login-box .stButton > button:hover {
+        background-color:#1b5fa7;
     }
     </style>
     <div class="login-container"><div class="login-box">
-    <h2>Movie Recommender</h2>
-    <h3>Welcome</h3>
+    <h2>Movie Recommender</h2><h3>Welcome</h3>
     """, unsafe_allow_html=True)
 
     mode = st.radio("", ["Log in", "Sign up", "Forgot password"], horizontal=True, key="auth_mode")
@@ -139,18 +155,18 @@ def login_screen():
 
     elif mode == "Sign up":
         username = st.text_input("Choose a username", key="signup_user")
-        email = st.text_input("E‑mail", key="signup_email")
+        email = st.text_input("E-mail", key="signup_email")
         password = st.text_input("Password", type="password", key="signup_pwd")
         confirm = st.text_input("Confirm password", type="password", key="signup_conf")
         if st.button("Create account", key="do_signup"):
             if username in users:
                 st.error("Username already exists.")
             elif not re.fullmatch(r"[^@]+@[^@]+\.[^@]+", email):
-                st.error("Invalid e‑mail.")
+                st.error("Invalid e-mail.")
             elif password != confirm:
                 st.error("Passwords do not match.")
             elif not strong_pwd(password):
-                st.error("Password must be at least 8 characters.")
+                st.error("Password must be at least 8 characters.")
             else:
                 users[username] = {"email": email, "pw_hash": hash_pw(password), "likes": []}
                 save_users(users)
@@ -160,7 +176,7 @@ def login_screen():
 
     else:  # Forgot password
         username = st.text_input("Username", key="reset_user")
-        email = st.text_input("Registered e‑mail", key="reset_email")
+        email = st.text_input("Registered e-mail", key="reset_email")
         new_pwd = st.text_input("New password", type="password", key="reset_new")
         confirm = st.text_input("Confirm new password", type="password", key="reset_conf")
         if st.button("Reset password", key="do_reset"):
@@ -168,16 +184,15 @@ def login_screen():
                 if new_pwd != confirm:
                     st.error("Passwords do not match.")
                 elif not strong_pwd(new_pwd):
-                    st.error("Password must be at least 8 characters.")
+                    st.error("Password must be at least 8 characters.")
                 else:
                     users[username]["pw_hash"] = hash_pw(new_pwd)
                     save_users(users)
                     st.success("Password reset – you can log in now.")
                 safe_rerun()
             else:
-                st.error("Username / e‑mail mismatch.")
+                st.error("Username / e-mail mismatch.")
 
-    # Close the styled container
     st.markdown("</div></div>", unsafe_allow_html=True)
 
 ###############################################################################
@@ -349,24 +364,13 @@ def recommender_ui(df, cos, idx):
 ###############################################################################
 def main():
     init_auth_state()
-
-    if not st.session_state["logged_in"]:
+    if not st.session_state["show_login"]:
+        welcome_screen()
+    elif not st.session_state["logged_in"]:
         login_screen()
     else:
         df, cos, idx = load_data()
         recommender_ui(df, cos, idx)
-
-# capture Enter key on movie field
-def _set_enter_hotkey():
-    if not st.runtime.exists():
-        return
-    from streamlit.runtime.scriptrunner import get_script_run_ctx
-
-    ctx = get_script_run_ctx()
-    if ctx:
-        st.session_state.setdefault("trigger_rec", False)
-        if ctx.request_rerun_data.widget_states.get("MovieRecommender") is not None:
-            st.session_state["trigger_rec"] = True
 
 if __name__ == "__main__":
     main()
