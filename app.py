@@ -60,34 +60,6 @@ def safe_rerun():
 # 3. ───────────────────────────  WELCOME UI  ────────────────────────────── #
 ###############################################################################
 def welcome_screen():
-    # CSS for container and button
-    st.markdown("""
-    <style>
-    .welcome-container {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        height: 100vh;
-        margin: 0;
-        padding: 0;
-        background-color: #000;
-    }
-    .welcome-container .stButton > button {
-        padding: 20px 60px !important;
-        font-size: 28px !important;
-        background-color: #FFA500 !important;
-        color: #000 !important;
-        border: none !important;
-        border-radius: 10px !important;
-        cursor: pointer;
-    }
-    .welcome-container .stButton > button:hover {
-        background-color: #e69500 !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
     # Container for logo and button
     st.markdown('<div class="welcome-container">', unsafe_allow_html=True)
 
