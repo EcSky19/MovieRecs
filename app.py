@@ -1,11 +1,10 @@
 # app.py
-import os, json, re, bcrypt, getpass, stat, pathlib
+import os, json, re, getpass, stat, pathlib
 import pandas as pd
 import streamlit as st
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import linear_kernel
 from pathlib import Path
-
 
 ###############################################################################
 # 0. ──────────────────────────────  CONSTANTS  ────────────────────────────── #
@@ -15,8 +14,9 @@ USER_FILE.parent.mkdir(parents=True, exist_ok=True)
 PEPPER = os.getenv("MOVIEREC_PEPPER", "").encode()
 
 ###############################################################################
-# 1. ────────────────────────────  USER STORAGE  ──────────────────────────── #
+# 1. ────────────────────────────  USER STORAGE  ──────────────────────────── #
 ###############################################################################
+
 def load_users() -> dict:
     if USER_FILE.exists():
         with open(USER_FILE, "r", encoding="utf-8") as f:
@@ -26,6 +26,7 @@ def load_users() -> dict:
                 return {}
     return {}
 
+
 def save_users(users: dict) -> None:
     tmp = USER_FILE.with_suffix(".tmp")
     with open(tmp, "w", encoding="utf-8") as f:
@@ -33,10 +34,14 @@ def save_users(users: dict) -> None:
     tmp.replace(USER_FILE)
     USER_FILE.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0600
 
+
 def hash_pw(password: str) -> str:
+    import bcrypt
     return bcrypt.hashpw(password.encode() + PEPPER, bcrypt.gensalt()).decode()
 
+
 def verify_pw(password: str, hashed: str) -> bool:
+    import bcrypt
     try:
         return bcrypt.checkpw(password.encode() + PEPPER, hashed.encode())
     except ValueError:
@@ -45,10 +50,12 @@ def verify_pw(password: str, hashed: str) -> bool:
 ###############################################################################
 # 2. ────────────────────────  SESSION‑STATE HELPERS  ─────────────────────── #
 ###############################################################################
+
 def init_auth_state():
     st.session_state.setdefault("logged_in", False)
     st.session_state.setdefault("username", None)
     st.session_state.setdefault("users", load_users())
+
 
 def safe_rerun():
     # Streamlit < 1.31 lacks experimental_rerun
@@ -56,23 +63,74 @@ def safe_rerun():
         st.experimental_rerun()
 
 ###############################################################################
-# 3. ─────────────────────────────  AUTH UI  ──────────────────────────────── #
+# 3. ─────────────────────────────  AUTH UI  ──────────────────────────────── #
 ###############################################################################
+
 def strong_pwd(pwd: str) -> bool:
     return len(pwd) >= 8
 
+
 def login_screen():
-    mode = st.radio("Choose an option", ["Log in", "Sign up", "Forgot password"],
-                    horizontal=True, key="auth_mode")
+    # --- Inject dark-themed CSS and container/background ---
+    st.markdown("""
+    <style>
+    .login-container {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        background-image: url('https://example.com/your-background.jpg');
+        background-size: cover;
+    }
+    .login-box {
+        background-color: rgba(0, 0, 0, 0.7);
+        padding: 40px;
+        border-radius: 10px;
+        width: 400px;
+        box-shadow: 0 0 10px rgba(0,0,0,0.5);
+    }
+    .login-box h2, .login-box h3 {
+        color: #FAFAFA;
+        text-align: center;
+        margin-bottom: 20px;
+    }
+    .login-box .stRadio>div {
+        margin-bottom: 20px;
+    }
+    .login-box .stTextInput>div>div>input {
+        width: 100%;
+        padding: 10px;
+        margin-bottom: 15px;
+        border: none;
+        border-radius: 5px;
+    }
+    .login-box .stButton button {
+        width: 100%;
+        padding: 10px;
+        background-color: #1f77b4;
+        color: white;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 16px;
+    }
+    .login-box .stButton button:hover {
+        background-color: #1b5fa7;
+    }
+    </style>
+    <div class="login-container"><div class="login-box">
+    <h2>Movie Recommender</h2>
+    <h3>Welcome</h3>
+    """, unsafe_allow_html=True)
+
+    mode = st.radio("", ["Log in", "Sign up", "Forgot password"], horizontal=True, key="auth_mode")
     users = st.session_state["users"]
 
     if mode == "Log in":
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-        if st.button("Log in"):
+        username = st.text_input("Username", key="login_user")
+        password = st.text_input("Password", type="password", key="login_pwd")
+        if st.button("Log in", key="do_login"):
             if username in users and verify_pw(password, users[username]["pw_hash"]):
-                st.session_state["logged_in"] = True
-                st.session_state["username"]  = username
                 st.session_state["logged_in"] = True
                 st.session_state["username"]  = username
                 safe_rerun()
@@ -80,11 +138,11 @@ def login_screen():
                 st.error("Incorrect username or password.")
 
     elif mode == "Sign up":
-        username = st.text_input("Choose a username")
-        email = st.text_input("E‑mail")
-        password = st.text_input("Password", type="password")
-        confirm = st.text_input("Confirm password", type="password")
-        if st.button("Create account"):
+        username = st.text_input("Choose a username", key="signup_user")
+        email = st.text_input("E‑mail", key="signup_email")
+        password = st.text_input("Password", type="password", key="signup_pwd")
+        confirm = st.text_input("Confirm password", type="password", key="signup_conf")
+        if st.button("Create account", key="do_signup"):
             if username in users:
                 st.error("Username already exists.")
             elif not re.fullmatch(r"[^@]+@[^@]+\.[^@]+", email):
@@ -94,26 +152,19 @@ def login_screen():
             elif not strong_pwd(password):
                 st.error("Password must be at least 8 characters.")
             else:
-                users[username] = {
-                    "email": email,
-                    "pw_hash": hash_pw(password),
-                    "likes": [],
-                }
+                users[username] = {"email": email, "pw_hash": hash_pw(password), "likes": []}
                 save_users(users)
                 st.success("Account created – you’re now logged in!")
                 st.session_state.update(logged_in=True, username=username)
                 safe_rerun()
 
     else:  # Forgot password
-        username = st.text_input("Username")
-        email = st.text_input("Registered e‑mail")
-        new_pwd = st.text_input("New password", type="password")
-        confirm = st.text_input("Confirm new password", type="password")
-        if st.button("Reset password"):
-            if (
-                username in users
-                and users[username]["email"].lower() == email.lower()
-            ):
+        username = st.text_input("Username", key="reset_user")
+        email = st.text_input("Registered e‑mail", key="reset_email")
+        new_pwd = st.text_input("New password", type="password", key="reset_new")
+        confirm = st.text_input("Confirm new password", type="password", key="reset_conf")
+        if st.button("Reset password", key="do_reset"):
+            if username in users and users[username]["email"].lower() == email.lower():
                 if new_pwd != confirm:
                     st.error("Passwords do not match.")
                 elif not strong_pwd(new_pwd):
@@ -125,6 +176,9 @@ def login_screen():
                 safe_rerun()
             else:
                 st.error("Username / e‑mail mismatch.")
+
+    # Close the styled container
+    st.markdown("</div></div>", unsafe_allow_html=True)
 
 ###############################################################################
 # 4. ─────────────────────  MOVIE DATA & SIMILARITY  ──────────────────────── #
