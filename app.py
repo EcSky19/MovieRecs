@@ -1,5 +1,5 @@
 # app.py
-import os, json, re, getpass, stat, pathlib
+import os, json, re, stat, pathlib, base64
 import pandas as pd
 import streamlit as st
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -60,7 +60,7 @@ def safe_rerun():
 # 3. ───────────────────────────  WELCOME UI  ────────────────────────────── #
 ###############################################################################
 def welcome_screen():
-    # Display logo and a centered, large orange Get Started button
+    # CSS for container and button
     st.markdown("""
     <style>
     .welcome-container {
@@ -72,10 +72,6 @@ def welcome_screen():
         margin: 0;
         padding: 0;
         background-color: #000;
-    }
-    .welcome-logo {
-        max-width: 300px;
-        margin-bottom: 40px;
     }
     .welcome-container .stButton > button {
         padding: 20px 60px !important;
@@ -90,15 +86,28 @@ def welcome_screen():
         background-color: #e69500 !important;
     }
     </style>
-    <div class="welcome-container">
-        <img src="/mnt/data/ChatGPT Image Apr 29, 2025, 11_13_51 AM.png" class="welcome-logo" />
     """, unsafe_allow_html=True)
 
-    # Streamlit button inside the styled container
+    # Container for logo and button
+    st.markdown('<div class="welcome-container">', unsafe_allow_html=True)
+
+    # Embed local logo via base64
+    BASE = Path(__file__).parent 
+    logo_path = BASE / "data" / "logo.png"
+    if logo_path.exists():
+        encoded = base64.b64encode(logo_path.read_bytes()).decode()
+        st.markdown(
+            f'<img src="data:image/png;base64,{encoded}" width="300" style="margin-bottom:40px;"/>',
+            unsafe_allow_html=True
+        )
+    else:
+        st.error("Logo not found at /data/logo.png")
+
+    # Get Started button
     if st.button("Get Started!", key="welcome_get_started"):
         st.session_state["show_login"] = True
 
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
 ###############################################################################
 # 4. ─────────────────────────────  AUTH UI  ──────────────────────────────── #
@@ -107,38 +116,6 @@ def strong_pwd(pwd: str) -> bool:
     return len(pwd) >= 8
 
 def login_screen():
-    st.markdown("""
-    <style>
-    .login-container {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        height: 100vh;
-        background-image: url('https://example.com/login-bg.jpg');
-        background-size: cover;
-    }
-    .login-box {
-        background-color: rgba(0, 0, 0, 0.7);
-        padding: 40px;
-        border-radius: 10px;
-        width: 400px;
-        box-shadow: 0 0 10px rgba(0,0,0,0.5);
-        color: #FAFAFA;
-    }
-    .login-box input {
-        width:100%;padding:10px;margin-bottom:15px;border:none;border-radius:5px;
-    }
-    .login-box .stButton > button {
-        width:100%;padding:10px;background-color:#1f77b4;color:white;border:none;border-radius:5px;font-size:16px;cursor:pointer;
-    }
-    .login-box .stButton > button:hover {
-        background-color:#1b5fa7;
-    }
-    </style>
-    <div class="login-container"><div class="login-box">
-    <h2>Movie Recommender</h2><h3>Welcome</h3>
-    """, unsafe_allow_html=True)
-
     mode = st.radio("", ["Log in", "Sign up", "Forgot password"], horizontal=True, key="auth_mode")
     users = st.session_state["users"]
 
@@ -148,7 +125,7 @@ def login_screen():
         if st.button("Log in", key="do_login"):
             if username in users and verify_pw(password, users[username]["pw_hash"]):
                 st.session_state["logged_in"] = True
-                st.session_state["username"]  = username
+                st.session_state["username"] = username
                 safe_rerun()
             else:
                 st.error("Incorrect username or password.")
@@ -174,7 +151,7 @@ def login_screen():
                 st.session_state.update(logged_in=True, username=username)
                 safe_rerun()
 
-    else:  # Forgot password
+    else:
         username = st.text_input("Username", key="reset_user")
         email = st.text_input("Registered e-mail", key="reset_email")
         new_pwd = st.text_input("New password", type="password", key="reset_new")
@@ -193,7 +170,7 @@ def login_screen():
             else:
                 st.error("Username / e-mail mismatch.")
 
-    st.markdown("</div></div>", unsafe_allow_html=True)
+    st.markdown('</div></div>', unsafe_allow_html=True)
 
 ###############################################################################
 # 4. ─────────────────────  MOVIE DATA & SIMILARITY  ──────────────────────── #
@@ -374,3 +351,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
