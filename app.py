@@ -247,7 +247,7 @@ def recommender_ui(df, cos, idx):
         if recs.empty:
             st.warning(f"‘{movie}’ not found; can’t recommend similar titles.")
         else:
-            st.success(f"Movies similar to ‘{movie}’")
+            st.success(f"Other movies you might like")
             for _, r in recs.iterrows():
                 c1, c2 = st.columns([1, 5])
                 with c1:
