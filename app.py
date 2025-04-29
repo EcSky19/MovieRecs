@@ -150,11 +150,7 @@ def create_weighted_features(row):
 
 @st.cache_resource(show_spinner=True)
 def load_data():
-    DATA_PATH = (
-        "/Users/ethancoskay/.cache/kagglehub/datasets/harshitshankhdhar/"
-        "imdb-dataset-of-top-1000-movies-and-tv-shows/versions/1/imdb_top_1000.csv"
-    )
-    df = pd.read_csv(DATA_PATH)
+    df = pd.read_csv("MovieRecs/imdb_top_1000.csv")
     df["IMDB_Rating"] = pd.to_numeric(df["IMDB_Rating"], errors="coerce").fillna(0)
     df["Meta_score"]  = pd.to_numeric(df.get("Meta_score"), errors="coerce").fillna(0)
 
