@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import linear_kernel
+from pathlib import Path
 
 
 ###############################################################################
@@ -149,8 +150,11 @@ def create_weighted_features(row):
             director_tokens + star_tokens).strip()
 
 @st.cache_resource(show_spinner=True)
+
 def load_data():
-    df = pd.read_csv("MovieRecs/imdb_top_1000.csv")
+    BASE = Path(__file__).parent 
+    DATA_PATH = BASE / "data" / "imdb_top_1000.csv"
+    df = pd.read_csv(DATA_PATH)
     df["IMDB_Rating"] = pd.to_numeric(df["IMDB_Rating"], errors="coerce").fillna(0)
     df["Meta_score"]  = pd.to_numeric(df.get("Meta_score"), errors="coerce").fillna(0)
 
