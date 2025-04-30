@@ -1,5 +1,4 @@
-# app.py
-import os, json, re, stat, pathlib, base64
+import os, json, re, stat, pathlib, base64, glob, ast
 import pandas as pd
 import streamlit as st
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -25,6 +24,7 @@ def load_users() -> dict:
                 return {}
     return {}
 
+
 def save_users(users: dict) -> None:
     tmp = USER_FILE.with_suffix(".tmp")
     with open(tmp, "w", encoding="utf-8") as f:
@@ -32,9 +32,11 @@ def save_users(users: dict) -> None:
     tmp.replace(USER_FILE)
     USER_FILE.chmod(stat.S_IRUSR | stat.S_IWUSR)
 
+
 def hash_pw(password: str) -> str:
     import bcrypt
     return bcrypt.hashpw(password.encode() + PEPPER, bcrypt.gensalt()).decode()
+
 
 def verify_pw(password: str, hashed: str) -> bool:
     import bcrypt
@@ -52,6 +54,7 @@ def init_auth_state():
     st.session_state.setdefault("users", load_users())
     st.session_state.setdefault("show_login", False)
 
+
 def safe_rerun():
     if hasattr(st, "experimental_rerun"):
         st.experimental_rerun()
@@ -60,11 +63,8 @@ def safe_rerun():
 # 3. ───────────────────────────  WELCOME UI  ────────────────────────────── #
 ###############################################################################
 def welcome_screen():
-    # Container for logo and button
     st.markdown('<div class="welcome-container">', unsafe_allow_html=True)
-
-    # Embed local logo via base64
-    BASE = Path(__file__).parent 
+    BASE = Path(__file__).parent
     logo_path = BASE / "data" / "logo.png"
     if logo_path.exists():
         encoded = base64.b64encode(logo_path.read_bytes()).decode()
@@ -74,11 +74,8 @@ def welcome_screen():
         )
     else:
         st.error("Logo not found at /data/logo.png")
-
-    # Get Started button
     if st.button("Get Started!", key="welcome_get_started"):
         st.session_state["show_login"] = True
-
     st.markdown('</div>', unsafe_allow_html=True)
 
 ###############################################################################
@@ -148,35 +145,72 @@ def login_screen():
 # 4. ─────────────────────  MOVIE DATA & SIMILARITY  ──────────────────────── #
 ###############################################################################
 def create_weighted_features(row):
-    """Turn each movie’s numeric + categorical attributes into a token string
-    that the TF‑IDF vectoriser can consume.  All numeric conversions are wrapped
-    in try/except so bad strings (e.g. '') never crash the app."""
     def safe_int(val, divisor=1):
         try:
             return int(round(float(val) / divisor))
         except (ValueError, TypeError):
             return 0
-
-    rating_tokens    = " rating"    * safe_int(row.get("IMDB_Rating", 0))
-    metascore_tokens = " metascore" * safe_int(row.get("Meta_score", 0), divisor=10)
-
-    genre_tokens    = (" " + row.get("Genre",    "")) * 3
+    rating_tokens    = " rating"    * safe_int(row.get("imdb_rating", 0))
+    metascore_tokens = " popularity" * safe_int(row.get("popularity", 0), divisor=10)
+    genre_tokens    = (" " + row.get("Genre", "")) * 3
     director_tokens = (" " + row.get("Director", ""))
-    star_tokens     = (" " + row.get("Star1",    ""))
-
+    star_tokens     = (" " + row.get("cast",    ""))
     return (rating_tokens + metascore_tokens + genre_tokens +
             director_tokens + star_tokens).strip()
 
 @st.cache_resource(show_spinner=True)
-
 def load_data():
-    BASE = Path(__file__).parent 
-    DATA_PATH = BASE / "data" / "imdb_top_1000.csv"
-    df = pd.read_csv(DATA_PATH)
-    df["IMDB_Rating"] = pd.to_numeric(df["IMDB_Rating"], errors="coerce").fillna(0)
-    df["Meta_score"]  = pd.to_numeric(df.get("Meta_score"), errors="coerce").fillna(0)
+    # Locate the latest TMDB daily updates CSV in data/
+    BASE = Path(__file__).parent
+    DATA_PATH = BASE / "data" / "TMDB_all_movies.csv"
+    df = pd.read_csv(DATA_PATH, low_memory=False)
 
-    df.fillna("", inplace=True)
+    # Standardize column names
+    df.rename(columns={
+        "title": "Series_Title",
+        "vote_average": "IMDB_Rating",
+        "popularity": "popularity",
+        "genres": "Genre",
+        "overview": "Overview",
+        "poster_path": "poster_path",
+        "release_date": "release_date"
+    }, inplace=True)
+
+    # Extract year from release_date
+    df["Released_Year"] = pd.to_datetime(df["release_date"], errors="coerce").dt.year.fillna(0).astype(int)
+
+    # Numeric conversions
+    df["imdb_rating"] = pd.to_numeric(df.get("IMDB_Rating"), errors="coerce").fillna(0)
+    df["popularity"]  = pd.to_numeric(df.get("popularity"), errors="coerce").fillna(0)
+
+    # Parse genres list if stored as stringified list
+    def parse_genres(x):
+        try:
+            lst = ast.literal_eval(x) if isinstance(x, str) else x
+            if isinstance(lst, list):
+                return ", ".join(g.get("name", str(g)) for g in lst)
+            return str(lst)
+        except Exception:
+            return str(x)
+    df["Genre"] = df["Genre"].apply(parse_genres)
+
+    # Director and cast (if present)
+    df["Director"] = df.get("director", "")
+    df["cast"]     = df.get("cast",     "")
+    df["Director"] = df["Director"].fillna("").astype(str)
+    df["cast"]     = df["cast"].fillna("").astype(str)
+
+    # Build full poster URL
+    def build_poster_link(path):
+        if pd.notna(path) and getattr(path, 'strip', None)():
+            return f"https://image.tmdb.org/t/p/w500{path}"
+        return ""
+    df["Poster_Link"] = df["poster_path"].apply(build_poster_link)
+
+    # Ensure overview
+    df["Overview"] = df.get("Overview", "").fillna("")
+
+    # Create weighted features for TF-IDF
     df["weighted"] = df.apply(create_weighted_features, axis=1)
     tfidf = TfidfVectorizer(stop_words="english")
     mat = tfidf.fit_transform(df["weighted"])
@@ -227,8 +261,8 @@ def recommender_ui(df, cos, idx):
             st.subheader("📖 Movie Info")
             c1, c2 = st.columns([1, 5])
             with c1:
-                if r["Poster_Link"]:
-                    st.image(r["Poster_Link"], width=120)
+                if r["poster_path"]:
+                    st.image(r["poster_path"], width=120)
             with c2:
                 stars = [r.get(f"Star{i}", "") for i in range(1,5) if r.get(f"Star{i}")]
                 st.markdown(
