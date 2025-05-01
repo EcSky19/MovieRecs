@@ -44,8 +44,10 @@ def hash_pw(password: str) -> str:
     return bcrypt.hashpw(password.encode() + PEPPER, bcrypt.gensalt()).decode()
 
 
-def verify_pw(password: str, hashed: str) -> bool:
+def verify_pw(password: str, hashed) -> bool:
     import bcrypt
+    if not isinstance(hashed, str):
+        return False
     try:
         return bcrypt.checkpw(password.encode() + PEPPER, hashed.encode())
     except ValueError:
@@ -92,7 +94,7 @@ def login_ui():
     st.subheader("Login or Sign Up")
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
-    col1, col2 = st.columns(2)
+    col1, col_strip = st.columns(2)
     with col1:
         if st.button("Login"):
             if username in users and verify_pw(password, users[username]):
@@ -101,7 +103,7 @@ def login_ui():
                 safe_rerun()
             else:
                 st.error("Invalid credentials")
-    with col2:
+    with col_strip:
         if st.button("Sign Up"):
             if username and username not in users:
                 users[username] = hash_pw(password)
@@ -165,7 +167,7 @@ def load_dataframe() -> pd.DataFrame:
         return pd.read_parquet(PARQUET_FILE)
     csvs = sorted(DATA_DIR.glob("tmdb_movies*.csv"))
     if not csvs:
-        st.error("No CSV found in data/.")
+        st.error("No CSV found in data/. Place the CSV here.")
         st.stop()
     df = pd.read_csv(
         csvs[-1],
@@ -235,8 +237,7 @@ def recommender_ui(df, cos, idx):
                 st.write(row["Overview"])
             st.markdown("---")
 
-# main remains unchanged
-if __name__ == "__main__":
+def main():
     init_auth_state()
     if not st.session_state["logged_in"]:
         if not st.session_state["show_login"]:
@@ -246,3 +247,6 @@ if __name__ == "__main__":
     else:
         df, cos, idx = load_data()
         recommender_ui(df, cos, idx)
+
+if __name__ == "__main__":
+    main()
