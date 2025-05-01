@@ -4,6 +4,7 @@ import streamlit as st
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import linear_kernel
 from pathlib import Path
+import joblib
 
 ###############################################################################
 # 0. ──────────────────────────────  CONSTANTS  ────────────────────────────── #
@@ -12,6 +13,10 @@ USER_FILE = pathlib.Path.home() / ".movie_recs_secure" / "users.json"
 USER_FILE.parent.mkdir(parents=True, exist_ok=True)
 PEPPER = os.getenv("MOVIEREC_PEPPER", "").encode()
 
+DATA_DIR = Path(__file__).parent / "data"
+PARQUET_FILE = DATA_DIR / "tmdb_latest.parquet"
+VECTORIZER_FILE = DATA_DIR / "tfidf_vectorizer.joblib"
+INDEX_FILE = DATA_DIR / "similarity_index.joblib"
 ###############################################################################
 # 1. ────────────────────────────  USER STORAGE  ──────────────────────────── #
 ###############################################################################
@@ -144,27 +149,7 @@ def login_screen():
 ###############################################################################
 # 4. ─────────────────────  MOVIE DATA & SIMILARITY  ──────────────────────── #
 ###############################################################################
-def create_weighted_features(row):
-    def safe_int(val, divisor=1):
-        try:
-            return int(round(float(val) / divisor))
-        except (ValueError, TypeError):
-            return 0
-    rating_tokens    = " rating"    * safe_int(row.get("imdb_rating", 0))
-    metascore_tokens = " popularity" * safe_int(row.get("popularity", 0), divisor=10)
-    genre_tokens    = (" " + row.get("Genre", "")) * 3
-    director_tokens = (" " + row.get("Director", ""))
-    star_tokens     = (" " + row.get("cast",    ""))
-    return (rating_tokens + metascore_tokens + genre_tokens +
-            director_tokens + star_tokens).strip()
-
-@st.cache_resource(show_spinner=True)
-def load_data():
-    # Locate the latest TMDB daily updates CSV in data/
-    BASE = Path(__file__).parent
-    DATA_PATH = BASE / "data" / "TMDB_all_movies.csv"
-    df = pd.read_csv(DATA_PATH, low_memory=False)
-
+def preprocess_df(df: pd.DataFrame) -> pd.DataFrame:
     # Standardize column names
     df.rename(columns={
         "title": "Series_Title",
@@ -173,49 +158,92 @@ def load_data():
         "genres": "Genre",
         "overview": "Overview",
         "poster_path": "poster_path",
-        "release_date": "release_date"
+        "release_date": "release_date",
+        "director": "director",
+        "cast": "cast"
     }, inplace=True)
 
-    # Extract year from release_date
+    # Extract year
     df["Released_Year"] = pd.to_datetime(df["release_date"], errors="coerce").dt.year.fillna(0).astype(int)
 
     # Numeric conversions
-    df["imdb_rating"] = pd.to_numeric(df.get("IMDB_Rating"), errors="coerce").fillna(0)
-    df["popularity"]  = pd.to_numeric(df.get("popularity"), errors="coerce").fillna(0)
+    df["imdb_rating"] = pd.to_numeric(df.get("IMDB_Rating"), errors="coerce").fillna(0).astype(int)
+    df["popularity"]  = pd.to_numeric(df.get("popularity"), errors="coerce").fillna(0).astype(int)
 
-    # Parse genres list if stored as stringified list
+    # Parse genres list
     def parse_genres(x):
         try:
             lst = ast.literal_eval(x) if isinstance(x, str) else x
             if isinstance(lst, list):
                 return ", ".join(g.get("name", str(g)) for g in lst)
             return str(lst)
-        except Exception:
+        except:
             return str(x)
-    df["Genre"] = df["Genre"].apply(parse_genres)
+    df["Genre"] = df["Genre"].apply(parse_genres).fillna("")
 
-    # Director and cast (if present)
-    df["Director"] = df.get("director", "")
-    df["cast"]     = df.get("cast",     "")
-    df["Director"] = df["Director"].fillna("").astype(str)
-    df["cast"]     = df["cast"].fillna("").astype(str)
+    # Ensure string columns
+    for col in ["Genre", "director", "cast", "Overview", "poster_path"]:
+        df[col] = df.get(col, "").fillna("").astype(str)
 
     # Build full poster URL
-    def build_poster_link(path):
-        if pd.notna(path) and getattr(path, 'strip', None)():
-            return f"https://image.tmdb.org/t/p/w500{path}"
-        return ""
-    df["Poster_Link"] = df["poster_path"].apply(build_poster_link)
+    df["Poster_Link"] = df["poster_path"].apply(
+        lambda p: f"https://image.tmdb.org/t/p/w500{p}" if p else ""
+    )
 
-    # Ensure overview
-    df["Overview"] = df.get("Overview", "").fillna("")
+    # Vectorized weighted feature construction
+    df["rating_tokens"]     = df["imdb_rating"].apply(lambda n: " rating" * n)  
+    df["popularity_tokens"] = (df["popularity"] // 10).apply(lambda n: " popularity" * n)
+    df["genre_tokens"]      = (" " + df["Genre"]).str.repeat(3)
+    df["director_tokens"]   = " " + df["director"]
+    df["star_tokens"]       = " " + df["cast"]
 
-    # Create weighted features for TF-IDF
-    df["weighted"] = df.apply(create_weighted_features, axis=1)
-    tfidf = TfidfVectorizer(stop_words="english")
-    mat = tfidf.fit_transform(df["weighted"])
-    cos = linear_kernel(mat, mat)
+    df["weighted"] = (
+        df["rating_tokens"]
+      + df["popularity_tokens"]
+      + df["genre_tokens"]
+      + df["director_tokens"]
+      + df["star_tokens"]
+    ).str.strip()
+
+    return df
+
+@st.cache_data(show_spinner=False)
+def load_dataframe() -> pd.DataFrame:
+    if PARQUET_FILE.exists():
+        return pd.read_parquet(PARQUET_FILE)
+    # fallback to CSV
+    df = pd.read_csv(
+        DATA_DIR / "TMDB_all_movies.csv",
+        usecols=["title","vote_average","popularity","genres",
+                 "overview","poster_path","release_date","director","cast"],
+        dtype={"vote_average":"float32","popularity":"float32",
+               "genres":"string","overview":"string",
+               "poster_path":"string","release_date":"string",
+               "director":"string","cast":"string"},
+        low_memory=False
+    )
+    df = preprocess_df(df)
+    df.to_parquet(PARQUET_FILE, index=False)
+    return df
+
+@st.cache_resource(show_spinner=False)
+def load_tfidf_and_cosine(df: pd.DataFrame):
+    # load or fit TF-IDF
+    if VECTORIZER_FILE.exists() and INDEX_FILE.exists():
+        tfidf = joblib.load(VECTORIZER_FILE)
+        cos   = joblib.load(INDEX_FILE)
+    else:
+        tfidf = TfidfVectorizer(stop_words="english")
+        mat = tfidf.fit_transform(df["weighted"])
+        cos = linear_kernel(mat, mat)
+        joblib.dump(tfidf, VECTORIZER_FILE)
+        joblib.dump(cos, INDEX_FILE)
     idx = pd.Series(df.index, index=df["Series_Title"].str.lower()).drop_duplicates()
+    return cos, idx
+
+def load_data():
+    df = load_dataframe()
+    cos, idx = load_tfidf_and_cosine(df)
     return df, cos, idx
 
 def recommend(title, df, cos, idx):
