@@ -6,6 +6,69 @@ from sklearn.metrics.pairwise import linear_kernel
 from pathlib import Path
 import joblib
 
+# ── NLTK Setup for Notebook-Style Recommender ────────────────────────────────
+import nltk
+from nltk.corpus import stopwords
+from nltk.stem import WordNetLemmatizer
+from nltk.tokenize import word_tokenize
+
+# Download required NLTK data
+nltk.download('punkt')
+nltk.download('wordnet')
+nltk.download('stopwords')
+
+# Initialize stop words and lemmatizer
+stop_words = set(stopwords.words('english'))
+lemmatizer = WordNetLemmatizer()
+
+def lemmatize_and_remove_stopwords(text: str):
+    tokens = word_tokenize(text.lower())
+    lems   = [lemmatizer.lemmatize(tok) for tok in tokens if tok.isalpha()]
+    return [tok for tok in lems if tok not in stop_words]
+
+def jaccard_similarity(list1, list2):
+    set1, set2 = set(list1), set(list2)
+    inter = len(set1 & set2)
+    union = len(set1 | set2)
+    return float(inter/union) if union else 0.0
+
+def merge_and_unique(row):
+    tags = []
+    for col in ['Genre','director','cast']:
+        for item in row.get(col, "").split(','):
+            item = item.strip()
+            if item:
+                tags.append(item)
+    return list(set(tags))
+
+def combined_similarity(idx, cos_sim_matrix, df):
+    idx_pos = df.index.get_loc(idx)
+    results = []
+    for i in df.index:
+        i_pos = df.index.get_loc(i)
+        jac = jaccard_similarity(df.at[idx, 'tags'], df.at[i, 'tags'])
+        cos = cos_sim_matrix[idx_pos, i_pos]
+        results.append((i, 0.5*cos + 0.5*jac))
+    return sorted(results, key=lambda x: x[1], reverse=True)
+
+@st.cache_resource(show_spinner=False)
+def load_nb_cosine_and_tags(df: pd.DataFrame):
+    # Build tags column on movies.csv data
+    df['tags'] = df.apply(merge_and_unique, axis=1)
+    # TF-IDF on the Overview/overview text
+    vectorizer_nb = TfidfVectorizer(tokenizer=lemmatize_and_remove_stopwords, max_features=5000)
+    # Determine which overview column to use
+    if 'Overview' in df.columns:
+        texts = df['Overview']
+    elif 'overview' in df.columns:
+        texts = df['overview']
+    else:
+        texts = pd.Series([''] * len(df), index=df.index)
+    tfidf_nb      = vectorizer_nb.fit_transform(texts.fillna(''))
+    # Cosine similarity matrix
+    cos_nb        = linear_kernel(tfidf_nb, tfidf_nb)
+    return cos_nb
+
 ###############################################################################
 # 0. ──────────────────────────────  CONSTANTS  ────────────────────────────── #
 ###############################################################################
@@ -13,10 +76,12 @@ USER_FILE = pathlib.Path.home() / ".movie_recs_secure" / "users.json"
 USER_FILE.parent.mkdir(parents=True, exist_ok=True)
 PEPPER = os.getenv("MOVIEREC_PEPPER", "").encode()
 
-DATA_DIR = Path(__file__).parent / "data"
-PARQUET_FILE    = DATA_DIR / "tmdb_latest.parquet"
-VECTORIZER_FILE = DATA_DIR / "tfidf_vectorizer.joblib"
-INDEX_FILE      = DATA_DIR / "similarity_index.joblib"
+DATA_DIR   = Path(__file__).parent / "data"
+MOVIES_CSV      = DATA_DIR / "movies.csv"
+TMDB_CSV        = DATA_DIR / "TMDB_all_movies.csv"
+VECTORIZER_FILE  = DATA_DIR / "tfidf_vectorizer.joblib"
+INDEX_FILE       = DATA_DIR / "cosine_index.joblib"
+TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
 
 ###############################################################################
 # 1. ────────────────────────────  USER STORAGE  ──────────────────────────── #
@@ -115,70 +180,10 @@ def login_ui():
 ###############################################################################
 # 5. ───────────────────────  DATA PROCESSING  &  SIMILARITY  ─────────────────── #
 ###############################################################################
-def preprocess_df(df: pd.DataFrame) -> pd.DataFrame:
-    df.rename(columns={
-        "title": "Series_Title",
-        "vote_average": "IMDB_Rating",
-        "popularity": "popularity",
-        "genres": "Genre",
-        "overview": "Overview",
-        "poster_path": "poster_path",
-        "release_date": "release_date",
-        "director": "director",
-        "cast": "cast",
-        "vote_count": "vote_count"
-    }, inplace=True)
-    df["Released_Year"] = pd.to_datetime(df["release_date"], errors="coerce").dt.year.fillna(0).astype(int)
-    df["imdb_rating"] = pd.to_numeric(df.get("IMDB_Rating"), errors="coerce").fillna(0)
-    df["popularity"]  = pd.to_numeric(df.get("popularity"), errors="coerce").fillna(0)
-    df["vote_count"]  = pd.to_numeric(df.get("vote_count"), errors="coerce").fillna(0)
-    def parse_genres(x):
-        try:
-            lst = ast.literal_eval(x) if isinstance(x, str) else x
-            if isinstance(lst, list):
-                return ", ".join(g.get("name", str(g)) for g in lst)
-            return str(lst)
-        except:
-            return str(x)
-    df["Genre"] = df["Genre"].apply(parse_genres).fillna("")
-    for col in ["Genre","director","cast","Overview","poster_path"]:
-        df[col] = df.get(col, "").fillna("").astype(str)
-    df["Poster_Link"] = df["poster_path"].apply(lambda p: f"https://image.tmdb.org/t/p/w500{p}" if p else "")
-    df["rating_tokens"]     = df["imdb_rating"].astype(int).apply(lambda n: " rating" * n)
-    df["popularity_tokens"] = (df["popularity"].astype(int)//10).apply(lambda n: " popularity" * n)
-    df["genre_tokens"]      = (" " + df["Genre"]).str.repeat(3)
-    df["director_tokens"]   = " " + df["director"]
-    df["star_tokens"]       = " " + df["cast"]
-    df["weighted"] = (
-        df["rating_tokens"] + df["popularity_tokens"] +
-        df["genre_tokens"]   + df["director_tokens"]   + df["star_tokens"]
-    ).str.strip()
-    C = df["imdb_rating"].mean()
-    m = df["vote_count"].quantile(0.90)
-    df["weighted_rating"] = df.apply(
-        lambda x: (x["vote_count"]/(x["vote_count"]+m) * x["imdb_rating"]) +
-                  (m/(m+x["vote_count"]) * C), axis=1
-    )
-    return df
-
 @st.cache_data(show_spinner=False)
-def load_dataframe() -> pd.DataFrame:
-    if PARQUET_FILE.exists():
-        return pd.read_parquet(PARQUET_FILE)
-    csvs = sorted(DATA_DIR.glob("tmdb_movies*.csv"))
-    if not csvs:
-        st.error("No CSV found in data/. Place the CSV here.")
-        st.stop()
-    df = pd.read_csv(
-        csvs[-1],
-        usecols=["title","vote_average","popularity","genres",
-                 "overview","poster_path","release_date",
-                 "director","cast","vote_count"],
-        low_memory=False
-    )
-    df = preprocess_df(df)
-    df.to_parquet(PARQUET_FILE, index=False)
-    return df
+def load_dataframe(path: Path) -> pd.DataFrame:
+    # Load CSV (movies.csv or TMDB_all_movies.csv)
+    return pd.read_csv(path)
 
 @st.cache_resource(show_spinner=False)
 def load_tfidf_and_cosine(df: pd.DataFrame):
@@ -196,9 +201,26 @@ def load_tfidf_and_cosine(df: pd.DataFrame):
 
 
 def load_data():
-    df  = load_dataframe()
-    cos, idx = load_tfidf_and_cosine(df)
-    return df, cos, idx
+    # DataFrame for recommendation
+    df_movies = load_dataframe(MOVIES_CSV)
+    # Normalize movie key column for movies.csv
+    if 'Series_Title' not in df_movies.columns:
+        if 'title' in df_movies.columns:
+            df_movies = df_movies.rename(columns={'title': 'Series_Title'})
+        elif 'Title' in df_movies.columns:
+            df_movies = df_movies.rename(columns={'Title': 'Series_Title'})
+    # DataFrame for display
+    df_tmdb = load_dataframe(TMDB_CSV)
+    # Normalize movie key column for TMDB data
+    if 'Series_Title' not in df_tmdb.columns:
+        if 'title' in df_tmdb.columns:
+            df_tmdb = df_tmdb.rename(columns={'title': 'Series_Title'})
+        elif 'Title' in df_tmdb.columns:
+            df_tmdb = df_tmdb.rename(columns={'Title': 'Series_Title'})
+    # Compute similarity on movies.csv
+    cos_nb = load_nb_cosine_and_tags(df_movies)
+    return df_movies, cos_nb, df_tmdb
+
 
 ###############################################################################
 # 6. ─────────────────────  HYBRID RECOMMENDATION  ───────────────────────── #
@@ -219,34 +241,64 @@ def hybrid_recommend(title: str, df: pd.DataFrame, cos, idx, top_n:int=10, conte
 ###############################################################################
 # 7. ─────────────────────────────  UI  ────────────────────────────── #
 ###############################################################################
-def recommender_ui(df, cos, idx):
-    st.title("Hybrid Movie Recommender")
-    movie = st.selectbox("Select a movie:", sorted(df["Series_Title"].tolist()))
-    num   = st.slider("How many recommendations?", 5, 20, 10)
-    alpha = st.slider("Content vs. Popularity weight", 0.0, 1.0, 0.5)
+def recommender_ui(df_movies: pd.DataFrame, cos_sim_matrix, df_tmdb: pd.DataFrame):
+    st.title("Movie Recommender")
+    movie = st.text_input("Enter a movie title:")
     if st.button("Recommend"):
-        recs = hybrid_recommend(movie, df, cos, idx, top_n=num, content_weight=alpha)
-        for _, row in recs.iterrows():
+        if not movie:
+            st.warning("Please enter a movie title to get recommendations.")
+            return
+        matches = df_movies[df_movies['Series_Title'].str.lower() == movie.lower()]
+        if matches.empty:
+            st.error(f"Movie '{movie}' not found in our dataset.")
+            return
+        sel_idx = matches.index[0]
+        sims = combined_similarity(sel_idx, cos_sim_matrix, df_movies)[:6]
+        rec_indices = [i for i,_ in sims if i != sel_idx][:5]
+        for idx in rec_indices:
+            title = df_movies.at[idx, 'Series_Title']
+            tmdb_row = df_tmdb[df_tmdb['Series_Title'].str.lower() == title.lower()]
+            row = tmdb_row.iloc[0] if not tmdb_row.empty else df_movies.loc[idx]
             cols = st.columns([1,3])
             with cols[0]:
-                if row["Poster_Link"]:
-                    st.image(row["Poster_Link"], use_column_width=True)
+                if 'poster_path' in row and pd.notna(row['poster_path']):
+                    url = TMDB_IMAGE_BASE + row['poster_path']
+                    st.image(url, use_container_width=True)
+                elif 'Poster_Link' in row and pd.notna(row['Poster_Link']):
+                    st.image(row['Poster_Link'], use_container_width=True)
             with cols[1]:
-                st.subheader(row["Series_Title"])
-                st.write(f"Rating: {row['imdb_rating']} · Votes: {row['vote_count']} · Score: {row['weighted_rating']:.2f}")
-                st.write(row["Overview"])
+                st.subheader(row.get('Series_Title', title))
+                rating = row.get('vote_average') or row.get('imdb_rating')
+                votes = row.get('vote_count') or row.get('No_of_Votes')
+                info = []
+                if pd.notna(rating):
+                    info.append(f"Rating: {rating}")
+                if pd.notna(votes):
+                    info.append(f"Votes: {int(votes)}")
+                if info:
+                    st.write(' · '.join(info))
+                desc = row.get('overview') or row.get('Overview')
+                if pd.notna(desc):
+                    st.write(desc)
+                rd = row.get('release_date')
+                if pd.notna(rd):
+                    st.write(f"Release Date: {rd}")
             st.markdown("---")
 
+###############################################################################
+# 8. ──────────────────────────────  MAIN  ────────────────────────────────── #
+###############################################################################
 def main():
     init_auth_state()
-    if not st.session_state["logged_in"]:
-        if not st.session_state["show_login"]:
+    if not st.session_state.get("logged_in", False):
+        if not st.session_state.get("show_login", False):
             welcome_screen()
         else:
             login_ui()
     else:
-        df, cos, idx = load_data()
-        recommender_ui(df, cos, idx)
+        df_movies, cos_nb, df_tmdb = load_data()
+        recommender_ui(df_movies, cos_nb, df_tmdb)
 
 if __name__ == "__main__":
     main()
+
